@@ -11,3 +11,6 @@
 
 # Development notes (keep blog post separate)
 BLOG.md
+
+# Release packages
+*.zip
