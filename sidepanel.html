@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>Gemini AutoGen</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            padding: 10px;
+            width: 300px;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        textarea {
+            width: 100%;
+            height: 150px;
+            resize: vertical;
+            padding: 5px;
+        }
+
+        button {
+            padding: 8px;
+            cursor: pointer;
+        }
+
+        .status-bar {
+            margin-top: 10px;
+            padding: 5px;
+            background: #f0f0f0;
+            border-radius: 4px;
+        }
+
+        .progress-container {
+            width: 100%;
+            background: #ddd;
+            height: 10px;
+            border-radius: 5px;
+            overflow: hidden;
+            margin-top: 5px;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: #4caf50;
+            width: 0%;
+            transition: width 0.3s;
+        }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            color: #666;
+        }
+
+        .error {
+            color: red;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h3>Gemini AutoGen</h3>
+            <button id="settingsBtn"
+                style="padding: 4px 8px; font-size: 12px; background: #eee; color: #333; border: 1px solid #ccc; border-radius: 4px;">⚙️
+                Settings</button>
+        </div>
+
+        <!-- Conversation URL Lock -->
+        <div style="border: 1px solid #e0e0e0; padding: 10px; border-radius: 4px; background: #fafafa;">
+            <label style="display: block; font-size: 12px; color: #555; margin-bottom: 5px;">🔒 Locked Conversation URL</label>
+            <div style="display: flex; gap: 5px;">
+                <input type="text" id="conversationUrlInput" placeholder="Paste Gemini chat URL here..." 
+                    style="flex: 1; padding: 6px 8px; font-size: 12px; border: 1px solid #ccc; border-radius: 4px;">
+                <button id="lockUrlBtn" style="padding: 6px 10px; font-size: 11px; background: #1a73e8; color: white; border: none; border-radius: 4px;">Lock</button>
+                <button id="clearUrlBtn" style="padding: 6px 10px; font-size: 11px; background: #f44336; color: white; border: none; border-radius: 4px;">Clear</button>
+            </div>
+            <div id="urlStatus" style="margin-top: 5px; font-size: 11px; color: #999;">No URL locked</div>
+        </div>
+
+        <div style="border: 1px dashed #ccc; padding: 10px; text-align: center; border-radius: 4px;">
+            <input type="file" id="jsonFile" accept=".json,.txt" style="width: 100%;">
+            <div id="fileInfo" style="margin-top: 5px; font-size: 12px; color: #666;">No file loaded</div>
+        </div>
+
+        <div style="display: flex; gap: 10px;">
+            <button id="startBtn" style="flex: 1; background: #4caf50; color: white; border: none;">Start</button>
+            <button id="stopBtn" style="flex: 1; background: #f44336; color: white; border: none;"
+                disabled>Stop</button>
+            <button id="resetBtn" style="flex: 0.5; background: #ff9800; color: white; border: none;">Reset</button>
+        </div>
+
+        <div class="status-bar">
+            <div class="info-row">
+                <span id="progressText">0/0</span>
+                <span id="timer"><span id="elapsedTime">0m 0s</span> / <span id="remainingTime">--m --s</span></span>
+            </div>
+            <div class="progress-container">
+                <div id="progressBar" class="progress-bar"></div>
+            </div>
+            <div id="statusText" style="margin-top: 5px; font-size: 13px;">Ready</div>
+            <div id="currentFileName" style="margin-top: 3px; font-size: 12px; color: #1a73e8; font-weight: 500;"></div>
+        </div>
+    </div>
+    <script src="sidepanel.js"></script>
+</body>
+
+</html>
