@@ -48,11 +48,11 @@ Create a JSON file with an array of tasks:
 ```json
 [
   {
-    "name": "sunset_beach",
+    "name": "sunset_beach.png",
     "prompt": "A beautiful sunset over a tropical beach with palm trees"
   },
   {
-    "name": "mountain_lake",
+    "name": "mountain_lake.png",
     "prompt": "A serene mountain lake reflecting snow-capped peaks"
   }
 ]
