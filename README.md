@@ -35,9 +35,14 @@ Before using the extension, you need to configure the file directories:
 
 1. Click the **⚙️ Settings** button in the side panel
 
-2. Select **Source Folder** - Where Chrome saves downloads (e.g., `Downloads/Chrome`)
+2. **Source Folder** - The folder where Chrome automatically downloads files (e.g., `Downloads` or `Downloads/Chrome`)
 
-3. Select **Output Folder** - Where renamed images will be saved (e.g., `Downloads/GeminiOutput`)
+   - This is where Gemini saves images when you click "Download full size"
+
+3. **Output Folder** - The final destination folder for renamed images (e.g., `Downloads/GeminiOutput`)
+   - Images will be automatically renamed and moved here
+
+![Settings](docs/images/settings.png)
 
 ## 🚀 Usage
 
