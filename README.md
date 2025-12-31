@@ -18,7 +18,7 @@ A Chrome Extension that automates batch image generation on Google Gemini. Load 
 1. Clone this repository:
 
    ```bash
-   git clone https://github.com/yourusername/GeminiAutoGen.git
+   git clone https://github.com/fangwangme/GeminiAutoGen.git
    ```
 
 2. Open Chrome and navigate to `chrome://extensions/`
