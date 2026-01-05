@@ -65,6 +65,35 @@
             border-radius: 4px;
             margin-bottom: 20px;
         }
+
+        .section {
+            margin-top: 30px;
+            border-top: 1px solid #eee;
+            padding-top: 20px;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        .form-group label {
+            display: block;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .form-group input {
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            width: 100px;
+        }
+        
+        .help-text {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 5px;
+        }
     </style>
 </head>
 
@@ -107,6 +136,42 @@
             </div>
         </div>
 
+        <div class="section">
+            <h3>2. Timing Settings</h3>
+            
+            <div class="form-group">
+                <label for="generationTimeout">Image Generation Timeout (seconds)</label>
+                <div class="help-text">Max wait time for image generation (Default: 300).</div>
+                <input type="number" id="generationTimeout" min="30" value="300">
+            </div>
+
+            <div class="form-group">
+                <label for="downloadTimeout">Download Wait Timeout (seconds)</label>
+                <div class="help-text">Max wait time for file download detection (Default: 120).</div>
+                <input type="number" id="downloadTimeout" min="30" value="120">
+            </div>
+
+            <div class="form-group">
+                <label for="pageLoadTimeout">Page Load / Stability (seconds)</label>
+                <div class="help-text">Wait for page load or stability (Default: 30).</div>
+                <input type="number" id="pageLoadTimeout" min="10" value="30">
+            </div>
+
+            <div class="form-group">
+                <label for="stepDelay">Action Step Delay (milliseconds)</label>
+                <div class="help-text">Base delay between UI actions (Default: 1000). Increase if script is too fast.</div>
+                <input type="number" id="stepDelay" min="100" step="100" value="1000">
+            </div>
+
+            <div class="form-group">
+                <label for="taskInterval">Task Interval (milliseconds)</label>
+                <div class="help-text">Wait time between tasks (Default: 2000). Increase to avoid rate limits.</div>
+                <input type="number" id="taskInterval" min="500" step="500" value="2000">
+            </div>
+
+            <button id="saveSettingsBtn" style="margin-top: 10px;">Save Timing Settings</button>
+            <div id="saveStatus" class="status"></div>
+        </div>
 
     </div>
     <script type="module" src="options.js"></script>

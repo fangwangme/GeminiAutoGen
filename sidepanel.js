@@ -343,6 +343,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     console.log("[Panel] Recreating tab...");
     statusText.textContent = "Resetting browser context...";
 
+    // Get Settings
+    const settings = await chrome.storage.local.get(['settings_taskInterval', 'settings_pageLoadTimeout']);
+    const taskInterval = settings.settings_taskInterval || 2000;
+    const pageLoadTimeout = (settings.settings_pageLoadTimeout || 30) * 1000;
+
     // Close current tab
     try {
       await chrome.tabs.remove(currentTabId);
@@ -350,8 +355,8 @@ document.addEventListener("DOMContentLoaded", async () => {
       console.log("[Panel] Tab already closed:", e);
     }
 
-    // Wait 2 seconds
-    await new Promise((r) => setTimeout(r, 2000));
+    // Wait for Task Interval (User Setting)
+    await new Promise((r) => setTimeout(r, taskInterval));
 
     if (!isRunning) return;
 
@@ -361,7 +366,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     currentTabId = newTab.id;
 
     // Wait for page load
-    await waitForPageLoad(currentTabId);
+    await waitForPageLoad(currentTabId, pageLoadTimeout);
 
     // Extra wait for Gemini to initialize
     await new Promise((r) => setTimeout(r, 1500));
@@ -373,7 +378,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // Wait for page to finish loading
-  function waitForPageLoad(tabId) {
+  function waitForPageLoad(tabId, timeoutMs = 30000) {
     return new Promise((resolve) => {
       const listener = (updatedTabId, changeInfo) => {
         if (updatedTabId === tabId && changeInfo.status === "complete") {
@@ -387,7 +392,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       setTimeout(() => {
         chrome.tabs.onUpdated.removeListener(listener);
         resolve();
-      }, 30000);
+      }, timeoutMs);
     });
   }
 

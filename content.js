@@ -2,6 +2,16 @@
 // This script processes ONE task and then signals completion
 
 (async function () {
+  // 0. Load Settings
+  const settings = await chrome.storage.local.get([
+      'settings_generationTimeout', 
+      'settings_pageLoadTimeout',
+      'settings_stepDelay'
+  ]);
+  const CONFIG_GEN_TIMEOUT = (settings.settings_generationTimeout || 300) * 1000;
+  const CONFIG_STABILITY_TIMEOUT = (settings.settings_pageLoadTimeout || 30) * 1000;
+  const CONFIG_STEP_DELAY = settings.settings_stepDelay || 1000;
+
   // --- Helpers ---
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -48,7 +58,7 @@
         }
       }
     }
-    await wait(1000);
+    await wait(CONFIG_STEP_DELAY);
   }
 
   // --- Main Logic ---
@@ -122,7 +132,7 @@
         )
       ).filter((img) => img.offsetParent !== null && img.width > 100); // Exclude tiny icons
 
-    const stabilityTimeout = 30000; // 30 second max
+    const stabilityTimeout = CONFIG_STABILITY_TIMEOUT; // User setting
     const stabilityStart = Date.now();
 
     // Wait for at least 1 image to exist AND all images to be loaded
@@ -131,7 +141,7 @@
         throw new Error("Page stability timeout (30s) - images not loaded");
       }
 
-      await wait(1000);
+      await wait(CONFIG_STEP_DELAY);
 
       const images = getGeneratedImages();
       const btns = getDownloadBtns();
@@ -165,26 +175,26 @@
     }
 
     // Extra safety wait before starting task
-    console.log("[Content] Waiting 3 seconds before starting task...");
-    await wait(3000);
+    console.log("[Content] Waiting safety delay...");
+    await wait(CONFIG_STEP_DELAY * 3);
 
     // 5. Scroll to bottom and prepare
     console.log("[Content] Scrolling to bottom...");
     await scrollToBottom();
-    await wait(1000); // Wait 1 second after scroll
+    await wait(CONFIG_STEP_DELAY); // Wait after scroll
 
     // 6. Activate and type
     console.log("[Content] Typing prompt...");
     inputField.click();
-    await wait(200);
+    await wait(Math.max(200, CONFIG_STEP_DELAY / 5));
     inputField.focus();
-    await wait(200);
+    await wait(Math.max(200, CONFIG_STEP_DELAY / 5));
 
     // Clear if needed
     if (inputField.innerText.trim().length > 0) {
       document.execCommand("selectAll", false, null);
       document.execCommand("delete", false, null);
-      await wait(200);
+      await wait(Math.max(200, CONFIG_STEP_DELAY / 5));
     }
 
     // Type prompt
@@ -209,7 +219,7 @@
     );
 
     // Wait 1 second before clicking send
-    await wait(1000);
+    await wait(CONFIG_STEP_DELAY);
 
     // 6. Click Send
     console.log("[Content] Waiting for Send button...");
@@ -236,7 +246,7 @@
       "Timeout waiting for Send Button"
     );
 
-    await wait(500);
+    await wait(CONFIG_STEP_DELAY / 2);
     sendBtn.click();
     console.log("[Content] Prompt sent.");
 
@@ -254,13 +264,13 @@
       () => {
         return getDownloadBtns().length > initialBtnCount;
       },
-      300000,
+      CONFIG_GEN_TIMEOUT,
       2000,
-      "Timeout waiting for Image Generation (5min)"
+      "Timeout waiting for Image Generation"
     );
 
     console.log("[Content] Generation complete.");
-    await wait(2000); // Stability wait
+    await wait(CONFIG_STEP_DELAY * 2); // Stability wait
 
     // 8. Download
     updateStatus("Downloading...");

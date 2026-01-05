@@ -114,6 +114,10 @@ async function waitForDownloadAndRename(targetFilename) {
   const sourceHandle = await getSourceHandle();
   const outputHandle = await getOutputHandle();
 
+  // Get Timeout Setting
+  const settings = await chrome.storage.local.get(['settings_downloadTimeout']);
+  const downloadTimeoutSeconds = settings.settings_downloadTimeout || 120;
+
   if (!sourceHandle || !outputHandle) {
     return { success: false, error: "Missing directory handles. Please configure in Options." };
   }
@@ -131,7 +135,7 @@ async function waitForDownloadAndRename(targetFilename) {
 
   // 2. Poll for new file
   const startTime = Date.now();
-  const timeout = 120000; // 2 minutes
+  const timeout = downloadTimeoutSeconds * 1000; // Convert to ms
   const interval = 2000; // 2 seconds
 
   while (Date.now() - startTime < timeout) {
