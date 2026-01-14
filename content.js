@@ -58,7 +58,6 @@
         }
       }
     }
-    await wait(CONFIG_STEP_DELAY);
   }
 
   // --- Main Logic ---
@@ -174,14 +173,11 @@
       }
     }
 
-    // Extra safety wait before starting task
-    console.log("[Content] Waiting safety delay...");
-    await wait(CONFIG_STEP_DELAY * 3);
+    // Removed unnecessary safety delay for faster prompt input
 
     // 5. Scroll to bottom and prepare
     console.log("[Content] Scrolling to bottom...");
     await scrollToBottom();
-    await wait(CONFIG_STEP_DELAY); // Wait after scroll
 
     // 6. Activate and type
     console.log("[Content] Typing prompt...");
@@ -218,8 +214,8 @@
       }
     );
 
-    // Wait 1 second before clicking send
-    await wait(CONFIG_STEP_DELAY);
+    // Brief wait to ensure input is registered
+    await wait(100);
 
     // 6. Click Send
     console.log("[Content] Waiting for Send button...");
@@ -246,7 +242,7 @@
       "Timeout waiting for Send Button"
     );
 
-    await wait(CONFIG_STEP_DELAY / 2);
+    await wait(100);
     sendBtn.click();
     console.log("[Content] Prompt sent.");
 
