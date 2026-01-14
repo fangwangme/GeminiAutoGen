@@ -139,8 +139,7 @@ async function waitForDownloadAndRename(targetFilename) {
   const interval = 2000; // 2 seconds
 
   while (Date.now() - startTime < timeout) {
-    await new Promise(r => setTimeout(r, interval));
-
+    // Check for file FIRST (before waiting), so we detect immediately
     let newFile = null;
     for await (const entry of sourceHandle.values()) {
       if (entry.kind === 'file' &&
@@ -259,6 +258,9 @@ async function waitForDownloadAndRename(targetFilename) {
         return { success: false, error: e.message };
       }
     }
+
+    // Wait before next check (only if file not found)
+    await new Promise(r => setTimeout(r, interval));
   }
 
   return { success: false, error: "Timeout waiting for download" };
