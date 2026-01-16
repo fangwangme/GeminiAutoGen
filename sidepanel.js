@@ -15,6 +15,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const clearUrlBtn = document.getElementById("clearUrlBtn");
   const urlStatus = document.getElementById("urlStatus");
   const currentFileNameEl = document.getElementById("currentFileName");
+  const restartContextCheckbox = document.getElementById("restartContextCheckbox");
 
   // State
   let loadedTasks = [];
@@ -23,6 +24,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   let isRunning = false;
   let conversationUrl = "";
   let lockedConversationUrl = ""; // Locked URL from storage
+  let restartBrowserContext = true; // Restart setting
   let timerInterval;
   let startTime = 0;
   let currentTabId = null;
@@ -40,6 +42,20 @@ document.addEventListener("DOMContentLoaded", async () => {
     urlStatus.textContent = "✅ URL locked - will use this conversation";
     urlStatus.style.color = "#4caf50";
   }
+
+  // Load saved restart setting
+  const restartData = await chrome.storage.local.get(["settings_restartBrowserContext"]);
+  restartBrowserContext = restartData.settings_restartBrowserContext !== undefined
+    ? restartData.settings_restartBrowserContext
+    : true;
+  restartContextCheckbox.checked = restartBrowserContext;
+
+  // Save restart setting when checkbox changes
+  restartContextCheckbox.addEventListener("change", async () => {
+    restartBrowserContext = restartContextCheckbox.checked;
+    await chrome.storage.local.set({ settings_restartBrowserContext: restartBrowserContext });
+    console.log(`[Panel] Restart browser context: ${restartBrowserContext}`);
+  });
 
   // Load saved tasks
   const data = await chrome.storage.local.get(["loadedTasks"]);
@@ -315,8 +331,15 @@ document.addEventListener("DOMContentLoaded", async () => {
       updateRemainingTime();
 
       if (currentIndex < taskQueue.length && isRunning) {
-        // Recreate tab for next task
-        recreateTab();
+        // Check if we should restart browser context
+        if (restartBrowserContext) {
+          // Recreate tab for next task
+          recreateTab();
+        } else {
+          // Continue without restarting
+          console.log("[Panel] Skipping browser context restart");
+          processNextTask();
+        }
       } else {
         // All done
         processNextTask();

@@ -78,12 +78,23 @@
         <div style="border: 1px solid #e0e0e0; padding: 10px; border-radius: 4px; background: #fafafa;">
             <label style="display: block; font-size: 12px; color: #555; margin-bottom: 5px;">🔒 Locked Conversation URL</label>
             <div style="display: flex; gap: 5px;">
-                <input type="text" id="conversationUrlInput" placeholder="Paste Gemini chat URL here..." 
+                <input type="text" id="conversationUrlInput" placeholder="Paste Gemini chat URL here..."
                     style="flex: 1; padding: 6px 8px; font-size: 12px; border: 1px solid #ccc; border-radius: 4px;">
                 <button id="lockUrlBtn" style="padding: 6px 10px; font-size: 11px; background: #1a73e8; color: white; border: none; border-radius: 4px;">Lock</button>
                 <button id="clearUrlBtn" style="padding: 6px 10px; font-size: 11px; background: #f44336; color: white; border: none; border-radius: 4px;">Clear</button>
             </div>
             <div id="urlStatus" style="margin-top: 5px; font-size: 11px; color: #999;">No URL locked</div>
+
+            <!-- Restart Browser Context Checkbox -->
+            <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid #e0e0e0;">
+                <label style="display: flex; align-items: center; font-size: 12px; color: #555; cursor: pointer;">
+                    <input type="checkbox" id="restartContextCheckbox" checked style="margin-right: 6px; cursor: pointer;">
+                    <span>🔄 Restart browser context between tasks</span>
+                </label>
+                <div style="font-size: 10px; color: #999; margin-top: 3px; margin-left: 18px;">
+                    Recommended: Prevents memory leaks and state pollution
+                </div>
+            </div>
         </div>
 
         <div style="border: 1px dashed #ccc; padding: 10px; text-align: center; border-radius: 4px;">

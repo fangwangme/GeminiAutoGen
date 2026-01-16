@@ -11,6 +11,7 @@ const downloadTimeoutInput = document.getElementById('downloadTimeout');
 const pageLoadTimeoutInput = document.getElementById('pageLoadTimeout');
 const stepDelayInput = document.getElementById('stepDelay');
 const taskIntervalInput = document.getElementById('taskInterval');
+const restartBrowserContextCheckbox = document.getElementById('restartBrowserContext');
 const saveSettingsBtn = document.getElementById('saveSettingsBtn');
 const saveStatus = document.getElementById('saveStatus');
 
@@ -20,19 +21,21 @@ const DEFAULTS = {
     settings_downloadTimeout: 120,
     settings_pageLoadTimeout: 30,
     settings_stepDelay: 1000,
-    settings_taskInterval: 2000
+    settings_taskInterval: 2000,
+    settings_restartBrowserContext: true
 };
 
 // Load saved settings
 async function loadSettings() {
     const result = await chrome.storage.local.get([
-        'outputSubfolder', 
+        'outputSubfolder',
         'sourceSubfolder',
         'settings_generationTimeout',
         'settings_downloadTimeout',
         'settings_pageLoadTimeout',
         'settings_stepDelay',
-        'settings_taskInterval'
+        'settings_taskInterval',
+        'settings_restartBrowserContext'
     ]);
 
     // Set Timing Inputs (or defaults)
@@ -41,6 +44,9 @@ async function loadSettings() {
     pageLoadTimeoutInput.value = result.settings_pageLoadTimeout || DEFAULTS.settings_pageLoadTimeout;
     stepDelayInput.value = result.settings_stepDelay || DEFAULTS.settings_stepDelay;
     taskIntervalInput.value = result.settings_taskInterval || DEFAULTS.settings_taskInterval;
+    restartBrowserContextCheckbox.checked = result.settings_restartBrowserContext !== undefined
+        ? result.settings_restartBrowserContext
+        : DEFAULTS.settings_restartBrowserContext;
 
     // Check Source Handle
     const sourceHandle = await getHandle('sourceHandle');
@@ -69,11 +75,12 @@ saveSettingsBtn.addEventListener('click', async () => {
             settings_downloadTimeout: parseInt(downloadTimeoutInput.value, 10),
             settings_pageLoadTimeout: parseInt(pageLoadTimeoutInput.value, 10),
             settings_stepDelay: parseInt(stepDelayInput.value, 10),
-            settings_taskInterval: parseInt(taskIntervalInput.value, 10)
+            settings_taskInterval: parseInt(taskIntervalInput.value, 10),
+            settings_restartBrowserContext: restartBrowserContextCheckbox.checked
         };
 
         await chrome.storage.local.set(settings);
-        
+
         saveStatus.textContent = '✅ Settings Saved!';
         saveStatus.className = 'status success';
         setTimeout(() => { saveStatus.textContent = ''; }, 3000);
