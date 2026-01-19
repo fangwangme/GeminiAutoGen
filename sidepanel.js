@@ -170,6 +170,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     // Filter queue
     taskQueue = loadedTasks.filter((item) => {
+      if (!item || !item.name) return false; // Skip invalid items
       let safeName = item.name.replace(/[^a-z0-9_\-.]/gi, "_");
       if (
         !safeName.toLowerCase().endsWith(".png") &&
