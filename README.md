@@ -96,7 +96,6 @@ The extension will:
 ├── content.js         # Single-task processor (IIFE)
 ├── background.js      # File system operations
 ├── options.html/js    # Directory configuration
-├── offscreen.html/js  # Offscreen document for file ops
 └── utils/idb.js       # IndexedDB wrapper for handles
 ```
 

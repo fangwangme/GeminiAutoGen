@@ -157,10 +157,16 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     // Pre-scan for existing files
     statusText.textContent = "Checking existing files...";
-    const response = await chrome.runtime.sendMessage({
-      action: "LIST_ALL_FILES",
-    });
-    const existingFiles = new Set(response.files || []);
+    let existingFiles = new Set();
+    try {
+      const response = await chrome.runtime.sendMessage({
+        action: "LIST_ALL_FILES",
+      });
+      existingFiles = new Set(response.files || []);
+    } catch (err) {
+      console.warn("Could not list existing files (background might be restarting):", err);
+      // Proceed without skipping (safer fallback)
+    }
 
     // Filter queue
     taskQueue = loadedTasks.filter((item) => {
