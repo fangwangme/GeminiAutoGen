@@ -28,9 +28,17 @@ document.addEventListener("DOMContentLoaded", async () => {
   let currentTabId = null;
 
   // Settings Button
-  settingsBtn.addEventListener("click", () => {
-    chrome.runtime.sendMessage({ action: "OPEN_OPTIONS" });
-  });
+  if (settingsBtn) {
+    settingsBtn.addEventListener("click", async () => {
+      try {
+        await chrome.runtime.openOptionsPage();
+      } catch (err) {
+        chrome.runtime.sendMessage({ action: "OPEN_OPTIONS" });
+      }
+    });
+  } else {
+    console.warn("[Panel] Settings button not found");
+  }
 
   // Load saved locked URL
   const urlData = await chrome.storage.local.get(["lockedConversationUrl"]);
@@ -41,43 +49,73 @@ document.addEventListener("DOMContentLoaded", async () => {
     urlStatus.style.color = "#4caf50";
   }
 
-  // Load saved tasks
-  const data = await chrome.storage.local.get(["loadedTasks"]);
-  if (data.loadedTasks) {
-    loadedTasks = data.loadedTasks;
-    fileInfo.textContent = `Loaded ${loadedTasks.length} tasks`;
-    fileInfo.style.color = "green";
-  }
+    // Load saved tasks
+    const data = await chrome.storage.local.get(["loadedTasks"]);
+    if (data.loadedTasks) {
+      loadedTasks = data.loadedTasks;
+      fileInfo.textContent = `Loaded ${loadedTasks.length} tasks`;
+      fileInfo.style.color = "green";
+    }
+
+    const focusSetting = await chrome.storage.local.get([
+      "settings_focusWindowOnDownload"
+    ]);
+    if (focusSetting.settings_focusWindowOnDownload === undefined) {
+      await chrome.storage.local.set({ settings_focusWindowOnDownload: true });
+    }
+
 
   // Lock URL Button
-  lockUrlBtn.addEventListener("click", async () => {
-    const url = conversationUrlInput.value.trim();
-    if (!url) {
-      urlStatus.textContent = "❌ Please enter a URL";
-      urlStatus.style.color = "#f44336";
-      return;
-    }
-    if (!url.includes("gemini.google.com")) {
-      urlStatus.textContent = "❌ Must be a Gemini URL";
-      urlStatus.style.color = "#f44336";
-      return;
-    }
-    lockedConversationUrl = url;
-    await chrome.storage.local.set({ lockedConversationUrl: url });
-    urlStatus.textContent = "✅ URL locked - will use this conversation";
-    urlStatus.style.color = "#4caf50";
-    console.log(`[Panel] Locked conversation URL: ${url}`);
-  });
+  if (lockUrlBtn) {
+    lockUrlBtn.addEventListener("click", async () => {
+      if (!conversationUrlInput || !urlStatus) return;
+      const url = conversationUrlInput.value.trim();
+      if (!url) {
+        urlStatus.textContent = "❌ Please enter a URL";
+        urlStatus.style.color = "#f44336";
+        return;
+      }
+      if (!url.includes("gemini.google.com")) {
+        urlStatus.textContent = "❌ Must be a Gemini URL";
+        urlStatus.style.color = "#f44336";
+        return;
+      }
+      lockedConversationUrl = url;
+      try {
+        await chrome.storage.local.set({ lockedConversationUrl: url });
+        urlStatus.textContent = "✅ URL locked - will use this conversation";
+        urlStatus.style.color = "#4caf50";
+        console.log(`[Panel] Locked conversation URL: ${url}`);
+      } catch (err) {
+        urlStatus.textContent = "❌ Failed to save URL";
+        urlStatus.style.color = "#f44336";
+        console.error("[Panel] Failed to lock URL:", err);
+      }
+    });
+  } else {
+    console.warn("[Panel] Lock URL button not found");
+  }
 
   // Clear URL Button
-  clearUrlBtn.addEventListener("click", async () => {
-    lockedConversationUrl = "";
-    conversationUrlInput.value = "";
-    await chrome.storage.local.remove("lockedConversationUrl");
-    urlStatus.textContent = "No URL locked";
-    urlStatus.style.color = "#999";
-    console.log("[Panel] Conversation URL lock cleared");
-  });
+  if (clearUrlBtn) {
+    clearUrlBtn.addEventListener("click", async () => {
+      if (!conversationUrlInput || !urlStatus) return;
+      lockedConversationUrl = "";
+      conversationUrlInput.value = "";
+      try {
+        await chrome.storage.local.remove("lockedConversationUrl");
+        urlStatus.textContent = "No URL locked";
+        urlStatus.style.color = "#999";
+        console.log("[Panel] Conversation URL lock cleared");
+      } catch (err) {
+        urlStatus.textContent = "❌ Failed to clear URL";
+        urlStatus.style.color = "#f44336";
+        console.error("[Panel] Failed to clear URL:", err);
+      }
+    });
+  } else {
+    console.warn("[Panel] Clear URL button not found");
+  }
 
   // JSON File Upload
   jsonFileInput.addEventListener("change", (event) => {
@@ -111,6 +149,9 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // START Button
   startBtn.addEventListener("click", async () => {
+    const storedUrl = await chrome.storage.local.get(["lockedConversationUrl"]);
+    lockedConversationUrl = storedUrl.lockedConversationUrl || "";
+
     if (loadedTasks.length === 0) {
       statusText.textContent = "Please upload a JSON file";
       statusText.style.color = "red";
@@ -137,7 +178,9 @@ document.addEventListener("DOMContentLoaded", async () => {
         const newTab = await chrome.tabs.create({ url: conversationUrl });
         currentTabId = newTab.id;
         await waitForPageLoad(currentTabId);
-        await new Promise((r) => setTimeout(r, 1500));
+        const settings = await chrome.storage.local.get(["settings_tabReadyDelay"]);
+        const tabReadyDelay = settings.settings_tabReadyDelay || 1.5;
+        await new Promise((r) => setTimeout(r, tabReadyDelay * 1000));
       }
     } else {
       // Get current tab (original behavior)
@@ -352,7 +395,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     // Get Settings
     const settings = await chrome.storage.local.get(['settings_taskInterval', 'settings_pageLoadTimeout']);
-    const taskInterval = settings.settings_taskInterval || 2000;
+    const taskInterval = (settings.settings_taskInterval || 2) * 1000;
     const pageLoadTimeout = (settings.settings_pageLoadTimeout || 30) * 1000;
 
     // Close current tab
@@ -376,7 +419,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     await waitForPageLoad(currentTabId, pageLoadTimeout);
 
     // Extra wait for Gemini to initialize
-    await new Promise((r) => setTimeout(r, 1500));
+    const tabSettings = await chrome.storage.local.get(["settings_tabReadyDelay"]);
+    const tabReadyDelay = tabSettings.settings_tabReadyDelay || 1.5;
+    await new Promise((r) => setTimeout(r, tabReadyDelay * 1000));
 
     if (!isRunning) return;
 
@@ -423,6 +468,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     timerInterval = setInterval(() => {
       const elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
       elapsedTimeElement.textContent = formatTime(elapsedSeconds);
+      updateRemainingTime();
     }, 1000);
   }
 
@@ -440,9 +486,11 @@ document.addEventListener("DOMContentLoaded", async () => {
       const avgSecondsPerTask = elapsedSeconds / completedTasks;
       const remainingTasks = totalTasks - completedTasks;
       const remainingSeconds = Math.floor(avgSecondsPerTask * remainingTasks);
-      remainingTimeElement.textContent = formatTime(remainingSeconds);
+      const avgSeconds = Math.round(avgSecondsPerTask);
+      remainingTimeElement.textContent = `${formatTime(remainingSeconds)} (avg ${avgSeconds}s)`;
     } else if (totalTasks === completedTasks && totalTasks > 0) {
-      remainingTimeElement.textContent = "0m 0s";
+      const avgSeconds = Math.round(elapsedSeconds / totalTasks);
+      remainingTimeElement.textContent = `0m 0s (avg ${avgSeconds}s)`;
     } else {
       remainingTimeElement.textContent = "--m --s";
     }

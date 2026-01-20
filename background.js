@@ -16,8 +16,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   // B. Wait for Download and Rename (Polling Mode)
   if (request.action === "WAIT_AND_RENAME") {
-    waitForDownloadAndRename(request.targetFilename)
+    waitForDownloadAndRename(request.targetFilename, {
+      tabId: sender.tab?.id,
+      windowId: sender.tab?.windowId,
+    })
       .then((result) => sendResponse(result))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  // C. Focus Gemini Tab
+  if (request.action === "FOCUS_TAB") {
+    focusTab(sender.tab?.id, sender.tab?.windowId)
+      .then(() => sendResponse({ success: true }))
       .catch((err) => sendResponse({ success: false, error: err.message }));
     return true;
   }
@@ -43,7 +54,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });
 
-// --- 2. File System Helpers ---
+// --- 2. Focus Helpers ---
+async function focusTab(tabId, windowId) {
+  if (typeof tabId !== 'number') return;
+  try {
+    if (typeof windowId === 'number') {
+      await chrome.windows.update(windowId, { focused: true });
+    }
+    await chrome.tabs.update(tabId, { active: true });
+  } catch (err) {
+    console.warn('[Background] Failed to focus tab/window:', err);
+  }
+}
+
+// --- 3. File System Helpers ---
 
 async function getSourceHandle() {
   try {
@@ -110,19 +134,33 @@ async function calculateFileHash(arrayBuffer) {
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-async function waitForDownloadAndRename(targetFilename) {
+async function waitForDownloadAndRename(targetFilename, tabInfo) {
   const sourceHandle = await getSourceHandle();
   const outputHandle = await getOutputHandle();
 
   // Get Timeout Setting
-  const settings = await chrome.storage.local.get(['settings_downloadTimeout']);
+  const settings = await chrome.storage.local.get([
+    'settings_downloadTimeout',
+    'settings_downloadPollInterval',
+    'settings_downloadStabilityInterval',
+    'settings_focusWindowOnDownload'
+  ]);
   const downloadTimeoutSeconds = settings.settings_downloadTimeout || 120;
+  const downloadPollIntervalSeconds = settings.settings_downloadPollInterval || 2;
+  const downloadStabilityIntervalSeconds = settings.settings_downloadStabilityInterval || 1;
+  const focusWindowOnDownload = settings.settings_focusWindowOnDownload !== false;
+  const focusTabId = tabInfo?.tabId;
+  const focusWindowId = tabInfo?.windowId;
 
   if (!sourceHandle || !outputHandle) {
     return { success: false, error: "Missing directory handles. Please configure in Options." };
   }
 
   console.log(`[Background] Waiting for new Gemini image to rename as: ${targetFilename}`);
+
+  if (focusWindowOnDownload) {
+    await focusTab(focusTabId, focusWindowId);
+  }
 
   // 1. Get initial file list (before download)
   const initialFiles = new Set();
@@ -136,7 +174,7 @@ async function waitForDownloadAndRename(targetFilename) {
   // 2. Poll for new file
   const startTime = Date.now();
   const timeout = downloadTimeoutSeconds * 1000; // Convert to ms
-  const interval = 2000; // 2 seconds
+  const interval = downloadPollIntervalSeconds * 1000;
 
   while (Date.now() - startTime < timeout) {
     await new Promise(r => setTimeout(r, interval));
@@ -159,7 +197,7 @@ async function waitForDownloadAndRename(targetFilename) {
       let stableCount = 0;
 
       while (stableCount < 3) { // 3 consecutive same-size checks
-        await new Promise(r => setTimeout(r, 1000));
+        await new Promise(r => setTimeout(r, downloadStabilityIntervalSeconds * 1000));
         try {
           const fileHandle = await sourceHandle.getFileHandle(newFile);
           const file = await fileHandle.getFile();
