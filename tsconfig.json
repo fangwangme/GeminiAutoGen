@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["DOM", "DOM.Iterable", "ES2022", "WebWorker"],
+    "strict": true,
+    "useDefineForClassFields": true,
+    "importsNotUsedAsValues": "remove",
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "types": ["chrome"]
+  },
+  "include": ["src/**/*.ts"]
+}

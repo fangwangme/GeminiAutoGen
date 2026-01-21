@@ -1,31 +1,29 @@
 {
-    "manifest_version": 3,
-    "name": "Gemini Auto Image Generator",
-    "version": "4.6.1",
-    "description": "Auto generate & download high-res images from Gemini with precise control",
-    "permissions": [
-        "activeTab",
-        "scripting",
-        "storage",
-        "downloads",
-        "tabs",
-        "sidePanel"
-    ],
-    "host_permissions": [
-        "https://gemini.google.com/*"
-    ],
-    "action": {
-        "default_title": "Open Gemini AutoGen"
-    },
-    "side_panel": {
-        "default_path": "sidepanel.html"
-    },
-    "options_ui": {
-        "page": "options.html",
-        "open_in_tab": true
-    },
-    "background": {
-        "service_worker": "background.js",
-        "type": "module"
-    }
+  "manifest_version": 3,
+  "name": "Gemini Auto Image Generator",
+  "version": "4.6.2",
+  "description": "Auto generate & download high-res images from Gemini with precise control",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "downloads",
+    "tabs",
+    "sidePanel"
+  ],
+  "host_permissions": ["https://gemini.google.com/*"],
+  "action": {
+    "default_title": "Open Gemini AutoGen"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  }
 }

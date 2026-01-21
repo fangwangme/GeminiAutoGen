@@ -1,39 +1,115 @@
+import type { TaskItem } from "./types.js";
+
+type PanelMessage =
+  | { action: "TASK_COMPLETE"; skipped?: boolean }
+  | { action: "TASK_ERROR"; error: string }
+  | { action: "UPDATE_STATUS"; status: string; isError?: boolean };
+
+type PanelBackgroundMessage =
+  | { action: "OPEN_OPTIONS" }
+  | { action: "LIST_ALL_FILES" }
+  | { action: "RESET_STATE" };
+
+type ListFilesResponse = {
+  files?: string[];
+};
+
+type ScriptInjection = chrome.scripting.ScriptInjection<unknown[], unknown>;
+type InjectionResult = chrome.scripting.InjectionResult<unknown>;
+
+const storageGet = <T,>(keys: string[]): Promise<T> =>
+  chrome.storage.local.get(keys) as unknown as Promise<T>;
+
+const storageSet = (items: Record<string, unknown>): Promise<void> =>
+  chrome.storage.local.set(items) as unknown as Promise<void>;
+
+const storageRemove = (keys: string | string[]): Promise<void> =>
+  chrome.storage.local.remove(keys) as unknown as Promise<void>;
+
+const storageClear = (): Promise<void> =>
+  chrome.storage.local.clear() as unknown as Promise<void>;
+
+const runtimeSendMessage = <T,>(
+  message: PanelMessage | PanelBackgroundMessage
+): Promise<T> => chrome.runtime.sendMessage(message) as unknown as Promise<T>;
+
+const tabsQuery = (
+  queryInfo: chrome.tabs.QueryInfo
+): Promise<chrome.tabs.Tab[]> =>
+  chrome.tabs.query(queryInfo) as unknown as Promise<chrome.tabs.Tab[]>;
+
+const tabsUpdate = (
+  tabId: number,
+  props: chrome.tabs.UpdateProperties
+): Promise<chrome.tabs.Tab> =>
+  chrome.tabs.update(tabId, props) as unknown as Promise<chrome.tabs.Tab>;
+
+const tabsCreate = (
+  props: chrome.tabs.CreateProperties
+): Promise<chrome.tabs.Tab> =>
+  chrome.tabs.create(props) as unknown as Promise<chrome.tabs.Tab>;
+
+const tabsRemove = (tabId: number): Promise<void> =>
+  chrome.tabs.remove(tabId) as unknown as Promise<void>;
+
+const executeScript = (
+  injection: ScriptInjection
+): Promise<InjectionResult[]> =>
+  chrome.scripting.executeScript(
+    injection
+  ) as unknown as Promise<InjectionResult[]>;
+
 document.addEventListener("DOMContentLoaded", async () => {
   // UI Elements
-  const jsonFileInput = document.getElementById("jsonFile");
-  const fileInfo = document.getElementById("fileInfo");
-  const startBtn = document.getElementById("startBtn");
-  const stopBtn = document.getElementById("stopBtn");
-  const statusText = document.getElementById("statusText");
-  const progressBar = document.getElementById("progressBar");
-  const progressText = document.getElementById("progressText");
-  const elapsedTimeElement = document.getElementById("elapsedTime");
-  const remainingTimeElement = document.getElementById("remainingTime");
-  const settingsBtn = document.getElementById("settingsBtn");
-  const conversationUrlInput = document.getElementById("conversationUrlInput");
-  const lockUrlBtn = document.getElementById("lockUrlBtn");
-  const clearUrlBtn = document.getElementById("clearUrlBtn");
-  const urlStatus = document.getElementById("urlStatus");
-  const currentFileNameEl = document.getElementById("currentFileName");
+  const jsonFileInput = document.getElementById("jsonFile") as HTMLInputElement;
+  const fileInfo = document.getElementById("fileInfo") as HTMLDivElement;
+  const startBtn = document.getElementById("startBtn") as HTMLButtonElement;
+  const stopBtn = document.getElementById("stopBtn") as HTMLButtonElement;
+  const statusText = document.getElementById("statusText") as HTMLDivElement;
+  const progressBar = document.getElementById("progressBar") as HTMLDivElement;
+  const progressText = document.getElementById("progressText") as HTMLSpanElement;
+  const elapsedTimeElement = document.getElementById(
+    "elapsedTime"
+  ) as HTMLSpanElement;
+  const remainingTimeElement = document.getElementById(
+    "remainingTime"
+  ) as HTMLSpanElement;
+  const settingsBtn = document.getElementById("settingsBtn") as
+    | HTMLButtonElement
+    | null;
+  const conversationUrlInput = document.getElementById(
+    "conversationUrlInput"
+  ) as HTMLInputElement;
+  const lockUrlBtn = document.getElementById("lockUrlBtn") as
+    | HTMLButtonElement
+    | null;
+  const clearUrlBtn = document.getElementById("clearUrlBtn") as
+    | HTMLButtonElement
+    | null;
+  const urlStatus = document.getElementById("urlStatus") as HTMLDivElement;
+  const currentFileNameEl = document.getElementById(
+    "currentFileName"
+  ) as HTMLDivElement;
+  const resetBtn = document.getElementById("resetBtn") as HTMLButtonElement;
 
   // State
-  let loadedTasks = [];
-  let taskQueue = [];
+  let loadedTasks: TaskItem[] = [];
+  let taskQueue: TaskItem[] = [];
   let currentIndex = 0;
   let isRunning = false;
   let conversationUrl = "";
   let lockedConversationUrl = ""; // Locked URL from storage
-  let timerInterval;
+  let timerInterval: number | undefined;
   let startTime = 0;
-  let currentTabId = null;
+  let currentTabId: number | null = null;
 
   // Settings Button
   if (settingsBtn) {
     settingsBtn.addEventListener("click", async () => {
       try {
         await chrome.runtime.openOptionsPage();
-      } catch (err) {
-        chrome.runtime.sendMessage({ action: "OPEN_OPTIONS" });
+      } catch {
+        runtimeSendMessage<void>({ action: "OPEN_OPTIONS" });
       }
     });
   } else {
@@ -41,7 +117,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // Load saved locked URL
-  const urlData = await chrome.storage.local.get(["lockedConversationUrl"]);
+  const urlData = await storageGet<{ lockedConversationUrl?: string }>([
+    "lockedConversationUrl"
+  ]);
   if (urlData.lockedConversationUrl) {
     lockedConversationUrl = urlData.lockedConversationUrl;
     conversationUrlInput.value = lockedConversationUrl;
@@ -49,21 +127,20 @@ document.addEventListener("DOMContentLoaded", async () => {
     urlStatus.style.color = "#4caf50";
   }
 
-    // Load saved tasks
-    const data = await chrome.storage.local.get(["loadedTasks"]);
-    if (data.loadedTasks) {
-      loadedTasks = data.loadedTasks;
-      fileInfo.textContent = `Loaded ${loadedTasks.length} tasks`;
-      fileInfo.style.color = "green";
-    }
+  // Load saved tasks
+  const data = await storageGet<{ loadedTasks?: TaskItem[] }>(["loadedTasks"]);
+  if (data.loadedTasks) {
+    loadedTasks = data.loadedTasks;
+    fileInfo.textContent = `Loaded ${loadedTasks.length} tasks`;
+    fileInfo.style.color = "green";
+  }
 
-    const focusSetting = await chrome.storage.local.get([
-      "settings_focusWindowOnDownload"
-    ]);
-    if (focusSetting.settings_focusWindowOnDownload === undefined) {
-      await chrome.storage.local.set({ settings_focusWindowOnDownload: true });
-    }
-
+  const focusSetting = await storageGet<{
+    settings_focusWindowOnDownload?: boolean;
+  }>(["settings_focusWindowOnDownload"]);
+  if (focusSetting.settings_focusWindowOnDownload === undefined) {
+    await storageSet({ settings_focusWindowOnDownload: true });
+  }
 
   // Lock URL Button
   if (lockUrlBtn) {
@@ -82,7 +159,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
       lockedConversationUrl = url;
       try {
-        await chrome.storage.local.set({ lockedConversationUrl: url });
+        await storageSet({ lockedConversationUrl: url });
         urlStatus.textContent = "✅ URL locked - will use this conversation";
         urlStatus.style.color = "#4caf50";
         console.log(`[Panel] Locked conversation URL: ${url}`);
@@ -103,7 +180,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       lockedConversationUrl = "";
       conversationUrlInput.value = "";
       try {
-        await chrome.storage.local.remove("lockedConversationUrl");
+        await storageRemove("lockedConversationUrl");
         urlStatus.textContent = "No URL locked";
         urlStatus.style.color = "#999";
         console.log("[Panel] Conversation URL lock cleared");
@@ -118,8 +195,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // JSON File Upload
-  jsonFileInput.addEventListener("change", (event) => {
-    const file = event.target.files[0];
+  jsonFileInput.addEventListener("change", (event: Event) => {
+    const target = event.target as HTMLInputElement | null;
+    const file = target?.files?.[0];
     if (!file) {
       loadedTasks = [];
       fileInfo.textContent = "No file loaded";
@@ -127,18 +205,20 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = (e: ProgressEvent<FileReader>) => {
       try {
-        const json = JSON.parse(e.target.result);
+        const result = e.target?.result;
+        const rawText = typeof result === "string" ? result : "";
+        const json = JSON.parse(rawText) as unknown;
         if (Array.isArray(json)) {
-          loadedTasks = json;
+          loadedTasks = json as TaskItem[];
           fileInfo.textContent = `Loaded ${json.length} tasks`;
           fileInfo.style.color = "green";
-          chrome.storage.local.set({ loadedTasks: json });
+          void storageSet({ loadedTasks: json });
         } else {
           throw new Error("File must contain an array");
         }
-      } catch (err) {
+      } catch {
         fileInfo.textContent = "Error: Invalid JSON";
         fileInfo.style.color = "red";
         loadedTasks = [];
@@ -149,7 +229,9 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // START Button
   startBtn.addEventListener("click", async () => {
-    const storedUrl = await chrome.storage.local.get(["lockedConversationUrl"]);
+    const storedUrl = await storageGet<{ lockedConversationUrl?: string }>([
+      "lockedConversationUrl"
+    ]);
     lockedConversationUrl = storedUrl.lockedConversationUrl || "";
 
     if (loadedTasks.length === 0) {
@@ -165,49 +247,62 @@ document.addEventListener("DOMContentLoaded", async () => {
       console.log(`[Panel] Using locked conversation URL: ${conversationUrl}`);
 
       // Get or create tab for the locked URL
-      const [existingTab] = await chrome.tabs.query({
-        url: conversationUrl + "*",
-        currentWindow: true,
+      const [existingTab] = await tabsQuery({
+        url: `${conversationUrl}*`,
+        currentWindow: true
       });
 
-      if (existingTab) {
+      if (existingTab && typeof existingTab.id === "number") {
         currentTabId = existingTab.id;
-        await chrome.tabs.update(currentTabId, { active: true });
+        await tabsUpdate(currentTabId, { active: true });
       } else {
         // Create new tab with locked URL
-        const newTab = await chrome.tabs.create({ url: conversationUrl });
-        currentTabId = newTab.id;
-        await waitForPageLoad(currentTabId);
-        const settings = await chrome.storage.local.get(["settings_tabReadyDelay"]);
-        const tabReadyDelay = settings.settings_tabReadyDelay || 1.5;
-        await new Promise((r) => setTimeout(r, tabReadyDelay * 1000));
+        const newTab = await tabsCreate({ url: conversationUrl });
+        currentTabId = newTab.id ?? null;
+        if (currentTabId) {
+          await waitForPageLoad(currentTabId);
+          const settings = await storageGet<{ settings_tabReadyDelay?: number }>([
+            "settings_tabReadyDelay"
+          ]);
+          const tabReadyDelay = settings.settings_tabReadyDelay || 1.5;
+          await new Promise((r) => setTimeout(r, tabReadyDelay * 1000));
+        }
       }
     } else {
       // Get current tab (original behavior)
-      const [tab] = await chrome.tabs.query({
+      const [tab] = await tabsQuery({
         active: true,
-        currentWindow: true,
+        currentWindow: true
       });
       if (!tab || !tab.url || !tab.url.includes("gemini.google.com")) {
         statusText.textContent = "Please open gemini.google.com or lock a URL";
         statusText.style.color = "red";
         return;
       }
-      currentTabId = tab.id;
+      currentTabId = tab.id ?? null;
       conversationUrl = tab.url;
       console.log(`[Panel] Conversation URL: ${conversationUrl}`);
     }
 
+    if (!currentTabId) {
+      statusText.textContent = "Failed to open Gemini tab";
+      statusText.style.color = "red";
+      return;
+    }
+
     // Pre-scan for existing files
     statusText.textContent = "Checking existing files...";
-    let existingFiles = new Set();
+    let existingFiles = new Set<string>();
     try {
-      const response = await chrome.runtime.sendMessage({
-        action: "LIST_ALL_FILES",
+      const response = await runtimeSendMessage<ListFilesResponse>({
+        action: "LIST_ALL_FILES"
       });
       existingFiles = new Set(response.files || []);
     } catch (err) {
-      console.warn("Could not list existing files (background might be restarting):", err);
+      console.warn(
+        "Could not list existing files (background might be restarting):",
+        err
+      );
       // Proceed without skipping (safer fallback)
     }
 
@@ -253,7 +348,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
   // RESET Button - Clear all state
-  const resetBtn = document.getElementById("resetBtn");
   resetBtn.addEventListener("click", async () => {
     // Stop any running tasks
     isRunning = false;
@@ -267,10 +361,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     currentTabId = null;
 
     // Clear storage
-    await chrome.storage.local.clear();
+    await storageClear();
 
     // Reset background state
-    await chrome.runtime.sendMessage({ action: "RESET_STATE" });
+    await runtimeSendMessage<void>({ action: "RESET_STATE" });
 
     // Reset UI
     fileInfo.textContent = "No file loaded";
@@ -283,9 +377,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     statusText.style.color = "green";
     currentFileNameEl.textContent = "";
     jsonFileInput.value = "";
-    
+
     // Restore locked URL if still set
-    const savedUrl = await chrome.storage.local.get(["lockedConversationUrl"]);
+    const savedUrl = await storageGet<{ lockedConversationUrl?: string }>([
+      "lockedConversationUrl"
+    ]);
     if (savedUrl.lockedConversationUrl) {
       lockedConversationUrl = savedUrl.lockedConversationUrl;
       conversationUrlInput.value = lockedConversationUrl;
@@ -333,14 +429,22 @@ document.addEventListener("DOMContentLoaded", async () => {
     currentFileNameEl.textContent = `📷 ${displayName}`;
 
     // Save current task to storage
-    await chrome.storage.local.set({ currentTask: task });
+    await storageSet({ currentTask: task });
+
+    if (!currentTabId) {
+      statusText.textContent = "Error: No active Gemini tab";
+      statusText.style.color = "red";
+      isRunning = false;
+      updateUI(false);
+      return;
+    }
 
     // Inject content script
     console.log(`[Panel] Injecting script for task ${currentIndex + 1}`);
     try {
-      await chrome.scripting.executeScript({
+      await executeScript({
         target: { tabId: currentTabId },
-        files: ["content.js"],
+        files: ["content.js"]
       });
     } catch (err) {
       console.error("[Panel] Injection failed:", err);
@@ -352,7 +456,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // Listen for messages from content script
-  chrome.runtime.onMessage.addListener((request) => {
+  chrome.runtime.onMessage.addListener((request: PanelMessage) => {
     if (request.action === "TASK_COMPLETE") {
       console.log(
         `[Panel] Task ${currentIndex + 1} complete (skipped: ${
@@ -394,15 +498,20 @@ document.addEventListener("DOMContentLoaded", async () => {
     statusText.textContent = "Resetting browser context...";
 
     // Get Settings
-    const settings = await chrome.storage.local.get(['settings_taskInterval', 'settings_pageLoadTimeout']);
+    const settings = await storageGet<{
+      settings_taskInterval?: number;
+      settings_pageLoadTimeout?: number;
+    }>(["settings_taskInterval", "settings_pageLoadTimeout"]);
     const taskInterval = (settings.settings_taskInterval || 2) * 1000;
     const pageLoadTimeout = (settings.settings_pageLoadTimeout || 30) * 1000;
 
     // Close current tab
-    try {
-      await chrome.tabs.remove(currentTabId);
-    } catch (e) {
-      console.log("[Panel] Tab already closed:", e);
+    if (currentTabId) {
+      try {
+        await tabsRemove(currentTabId);
+      } catch (err) {
+        console.log("[Panel] Tab already closed:", err);
+      }
     }
 
     // Wait for Task Interval (User Setting)
@@ -412,14 +521,24 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     // Open new tab
     console.log(`[Panel] Opening new tab: ${conversationUrl}`);
-    const newTab = await chrome.tabs.create({ url: conversationUrl });
-    currentTabId = newTab.id;
+    const newTab = await tabsCreate({ url: conversationUrl });
+    currentTabId = newTab.id ?? null;
+
+    if (!currentTabId) {
+      statusText.textContent = "Error: Could not create Gemini tab";
+      statusText.style.color = "red";
+      isRunning = false;
+      updateUI(false);
+      return;
+    }
 
     // Wait for page load
     await waitForPageLoad(currentTabId, pageLoadTimeout);
 
     // Extra wait for Gemini to initialize
-    const tabSettings = await chrome.storage.local.get(["settings_tabReadyDelay"]);
+    const tabSettings = await storageGet<{ settings_tabReadyDelay?: number }>([
+      "settings_tabReadyDelay"
+    ]);
     const tabReadyDelay = tabSettings.settings_tabReadyDelay || 1.5;
     await new Promise((r) => setTimeout(r, tabReadyDelay * 1000));
 
@@ -430,9 +549,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // Wait for page to finish loading
-  function waitForPageLoad(tabId, timeoutMs = 30000) {
-    return new Promise((resolve) => {
-      const listener = (updatedTabId, changeInfo) => {
+  function waitForPageLoad(tabId: number, timeoutMs = 30000) {
+    return new Promise<void>((resolve) => {
+      const listener = (
+        updatedTabId: number,
+        changeInfo: chrome.tabs.TabChangeInfo
+      ) => {
         if (updatedTabId === tabId && changeInfo.status === "complete") {
           chrome.tabs.onUpdated.removeListener(listener);
           resolve();
@@ -449,13 +571,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // UI Helpers
-  function updateUI(running) {
+  function updateUI(running: boolean) {
     startBtn.disabled = running;
     stopBtn.disabled = !running;
     jsonFileInput.disabled = running;
   }
 
-  function formatTime(seconds) {
+  function formatTime(seconds: number) {
     const m = Math.floor(seconds / 60);
     const s = seconds % 60;
     return `${m}m ${s}s`;
@@ -463,9 +585,11 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   function startTimer() {
     startTime = Date.now();
-    clearInterval(timerInterval);
+    if (timerInterval) {
+      clearInterval(timerInterval);
+    }
     // Only update elapsed time every second
-    timerInterval = setInterval(() => {
+    timerInterval = window.setInterval(() => {
       const elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
       elapsedTimeElement.textContent = formatTime(elapsedSeconds);
       updateRemainingTime();
@@ -473,7 +597,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   function stopTimer() {
-    clearInterval(timerInterval);
+    if (timerInterval) {
+      clearInterval(timerInterval);
+      timerInterval = undefined;
+    }
   }
 
   // Update remaining time estimate (called when a task completes)
@@ -487,7 +614,9 @@ document.addEventListener("DOMContentLoaded", async () => {
       const remainingTasks = totalTasks - completedTasks;
       const remainingSeconds = Math.floor(avgSecondsPerTask * remainingTasks);
       const avgSeconds = Math.round(avgSecondsPerTask);
-      remainingTimeElement.textContent = `${formatTime(remainingSeconds)} (avg ${avgSeconds}s)`;
+      remainingTimeElement.textContent = `${formatTime(
+        remainingSeconds
+      )} (avg ${avgSeconds}s)`;
     } else if (totalTasks === completedTasks && totalTasks > 0) {
       const avgSeconds = Math.round(elapsedSeconds / totalTasks);
       remainingTimeElement.textContent = `0m 0s (avg ${avgSeconds}s)`;
