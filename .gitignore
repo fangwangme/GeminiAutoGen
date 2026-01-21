@@ -23,7 +23,5 @@ node_modules
 # Lockfiles
 bun.lock
 
-# Local agent metadata
-.agent/
-AGENTS.md
+# Local temp repos
 temp_repos/
