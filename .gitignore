@@ -17,7 +17,13 @@ BLOG.md
 
 # Node
 node_modules/
+node_modules
 *.tsbuildinfo
 
 # Lockfiles
 bun.lock
+
+# Local agent metadata
+.agent/
+AGENTS.md
+temp_repos/
