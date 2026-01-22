@@ -3,6 +3,7 @@ import type { TaskItem } from "./types.js";
 type ContentSettings = {
   settings_generationTimeout?: number;
   settings_pageLoadTimeout?: number;
+  settings_inputTimeout?: number;
   settings_stepDelay?: number;
   settings_pollInterval?: number;
   settings_inputPollInterval?: number;
@@ -73,6 +74,7 @@ const logError = (message: string, data?: unknown) =>
   const settings = await storageGet<ContentSettings>([
     "settings_generationTimeout",
     "settings_pageLoadTimeout",
+    "settings_inputTimeout",
     "settings_stepDelay",
     "settings_pollInterval",
     "settings_inputPollInterval",
@@ -82,6 +84,7 @@ const logError = (message: string, data?: unknown) =>
   const CONFIG_GEN_TIMEOUT = (settings.settings_generationTimeout || 300) * 1000;
   const CONFIG_STABILITY_TIMEOUT =
     (settings.settings_pageLoadTimeout || 30) * 1000;
+  const CONFIG_INPUT_TIMEOUT = (settings.settings_inputTimeout || 5) * 1000;
   const rawStepDelaySeconds = settings.settings_stepDelay;
   const normalizedStepDelaySeconds =
     rawStepDelaySeconds && rawStepDelaySeconds > 60
@@ -97,6 +100,11 @@ const logError = (message: string, data?: unknown) =>
   const normalizedPollIntervalSeconds =
     pollIntervalSeconds > 0 ? pollIntervalSeconds : 1;
   const CONFIG_POLL = normalizedPollIntervalSeconds * 1000;
+  const CONFIG_STABILITY_GRACE = Math.min(
+    CONFIG_STABILITY_TIMEOUT,
+    Math.max(CONFIG_POLL, CONFIG_STEP_DELAY) * 2
+  );
+  const CONFIG_SEND_TIMEOUT = Math.max(CONFIG_INPUT_TIMEOUT, CONFIG_STEP_DELAY * 5);
 
   // No longer focus tab/window - only use element focus to avoid interrupting user
 
@@ -105,8 +113,8 @@ const logError = (message: string, data?: unknown) =>
 
   const waitFor = async (
     conditionFn: () => boolean | Promise<boolean>,
-    timeout = 60000,
-    checkInterval = 2000,
+    timeout = CONFIG_GEN_TIMEOUT,
+    checkInterval = CONFIG_POLL,
     errorMessage = "Timeout"
   ) => {
     const start = Date.now();
@@ -248,6 +256,7 @@ const logError = (message: string, data?: unknown) =>
   }
 
   function clickDownloadButton(button: HTMLButtonElement) {
+    button.focus({ preventScroll: true });
     ["pointerdown", "mousedown"].forEach((event) =>
       fireMouseEvent(button, event)
     );
@@ -762,15 +771,47 @@ const logError = (message: string, data?: unknown) =>
     // 4. Wait for input field
     logInfo("[Content] Waiting for input field...");
     let inputField: HTMLElement | null = null;
-    await waitFor(
-      () => {
-        inputField = findInputField();
-        return !!inputField;
-      },
-      15000,
-      CONFIG_POLL,
-      "Timeout waiting for Input Field"
-    );
+    const inputWaitStart = Date.now();
+    let lastInputWaitLog = 0;
+    const logInputWaitState = () => {
+      const editables = Array.from(
+        document.querySelectorAll<HTMLElement>("[contenteditable='true']")
+      );
+      const visibleEditables = editables.filter((el) => isVisible(el));
+      logInfo("[Content] Input field not ready yet", {
+        elapsedMs: Date.now() - inputWaitStart,
+        readyState: document.readyState,
+        contentEditableCount: editables.length,
+        visibleContentEditableCount: visibleEditables.length
+      });
+    };
+
+    try {
+      await waitFor(
+        () => {
+          inputField = findInputField();
+          if (inputField) return true;
+          const now = Date.now();
+          if (now - lastInputWaitLog >= 3000) {
+            lastInputWaitLog = now;
+            logInputWaitState();
+          }
+          return false;
+        },
+        CONFIG_INPUT_TIMEOUT,
+        CONFIG_POLL,
+        "Timeout waiting for Input Field"
+      );
+    } catch (err) {
+      logError("[Content] Input field wait timed out", {
+        elapsedMs: Date.now() - inputWaitStart
+      });
+      throw err;
+    }
+
+    logInfo("[Content] Input field detected", {
+      elapsedMs: Date.now() - inputWaitStart
+    });
 
     if (!inputField) {
       throw new Error("Input field not found after wait");
@@ -779,6 +820,12 @@ const logError = (message: string, data?: unknown) =>
 
     // 4.5 Wait for page to stabilize (previous images fully loaded)
     logInfo("[Content] Waiting for previous images to load...");
+    logInfo("[Content] Page stability settings", {
+      timeoutMs: CONFIG_STABILITY_TIMEOUT,
+      graceMs: CONFIG_STABILITY_GRACE,
+      pollMs: CONFIG_POLL,
+      stepDelayMs: CONFIG_STEP_DELAY
+    });
 
     // Find generated images (usually inside model response containers)
     const getStableGeneratedImages = () =>
@@ -794,7 +841,10 @@ const logError = (message: string, data?: unknown) =>
     // Wait for at least 1 image to exist AND all images to be loaded
     while (true) {
       if (Date.now() - stabilityStart > stabilityTimeout) {
-        throw new Error("Page stability timeout (30s) - images not loaded");
+        const timeoutSeconds = Math.round(stabilityTimeout / 1000);
+        throw new Error(
+          `Page stability timeout (${timeoutSeconds}s) - images not loaded`
+        );
       }
 
       await wait(CONFIG_STEP_DELAY);
@@ -810,7 +860,10 @@ const logError = (message: string, data?: unknown) =>
       // Alternative: if no images found but we have download buttons, count those as stable
       const hasButtons = btns.length > 0;
 
-      if (allLoaded || (hasButtons && Date.now() - stabilityStart > 10000)) {
+      if (
+        allLoaded ||
+        (hasButtons && Date.now() - stabilityStart > CONFIG_STABILITY_GRACE)
+      ) {
         logInfo(
           "[Content] Page stable",
           {
@@ -825,7 +878,7 @@ const logError = (message: string, data?: unknown) =>
       if (
         images.length === 0 &&
         btns.length === 0 &&
-        Date.now() - stabilityStart > 10000
+        Date.now() - stabilityStart > CONFIG_STABILITY_GRACE
       ) {
         logInfo("[Content] No existing images - proceeding with new conversation");
         break;
@@ -884,7 +937,7 @@ const logError = (message: string, data?: unknown) =>
         }
         return false;
       },
-      60000,
+      CONFIG_SEND_TIMEOUT,
       CONFIG_POLL,
       "Timeout waiting for Send Button"
     );
@@ -926,6 +979,7 @@ const logError = (message: string, data?: unknown) =>
     });
 
     await wait(CONFIG_STEP_DELAY / 2);
+    sendButton.focus({ preventScroll: true });
     sendButton.click();
     logInfo("[Content] Prompt sent.");
 
@@ -937,7 +991,7 @@ const logError = (message: string, data?: unknown) =>
         if (!field) return false;
         return normalizeText(field.innerText) === "";
       },
-      10000,
+      CONFIG_INPUT_TIMEOUT,
       CONFIG_POLL,
       "Send click did not clear input"
     );
@@ -961,7 +1015,7 @@ const logError = (message: string, data?: unknown) =>
           latestUserQuery = candidate;
           return true;
         },
-        10000,
+        CONFIG_INPUT_TIMEOUT,
         CONFIG_POLL,
         "Timeout waiting for prompt render"
       );
@@ -983,7 +1037,7 @@ const logError = (message: string, data?: unknown) =>
           }
           return false;
         },
-        10000,
+        CONFIG_INPUT_TIMEOUT,
         CONFIG_POLL,
         "Timeout waiting for conversation container"
       );

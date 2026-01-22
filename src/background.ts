@@ -1,12 +1,24 @@
 import { getHandle } from "./utils/idb.js";
 
+const formatLogTimestamp = () => new Date().toISOString();
+const attachConsoleTimestamps = () => {
+  const levels: Array<"log" | "warn" | "error"> = ["log", "warn", "error"];
+  levels.forEach((level) => {
+    const original = console[level].bind(console);
+    console[level] = (...args: unknown[]) => {
+      original(`[${formatLogTimestamp()}]`, ...args);
+    };
+  });
+};
+attachConsoleTimestamps();
+
 type BackgroundRequest =
   | { action: "CHECK_FILE_EXISTS"; filename: string }
   | { action: "WAIT_AND_RENAME"; targetFilename: string }
-  | { action: "FOCUS_TAB" }
   | { action: "LIST_ALL_FILES" }
   | { action: "OPEN_OPTIONS" }
   | { action: "RESET_STATE" }
+  | { action: "PANEL_LOG" }
   | {
       action: "LOG";
       level?: "log" | "warn" | "error";
@@ -26,7 +38,6 @@ type DownloadSettings = {
   settings_pollInterval?: number;
   settings_downloadPollInterval?: number;
   settings_downloadStabilityInterval?: number;
-  settings_focusWindowOnDownload?: boolean;
 };
 
 const storageGet = <T,>(keys: string[]): Promise<T> =>
@@ -63,6 +74,9 @@ chrome.runtime.onMessage.addListener(
     sender: chrome.runtime.MessageSender,
     sendResponse: (response?: unknown) => void
   ) => {
+    if (request.action === "PANEL_LOG") {
+      return;
+    }
     if (request.action === "LOG") {
       const level = request.level ?? "log";
       const prefix = request.source ? `[${request.source}] ` : "";
@@ -72,6 +86,18 @@ chrome.runtime.onMessage.addListener(
         logger(`${prefix}${request.message}`, request.data);
       } else {
         logger(`${prefix}${request.message}`);
+      }
+      try {
+        chrome.runtime.sendMessage({
+          action: "PANEL_LOG",
+          level,
+          message: request.message,
+          data: request.data,
+          source: request.source,
+          timestamp: formatLogTimestamp()
+        });
+      } catch {
+        // Ignore if panel is not open
       }
       sendResponse({ ok: true });
       return;
@@ -103,17 +129,6 @@ chrome.runtime.onMessage.addListener(
       return true;
     }
 
-    // C. Focus Gemini Tab
-    if (request.action === "FOCUS_TAB") {
-      focusTab(sender.tab?.id, sender.tab?.windowId)
-        .then(() => sendResponse({ success: true }))
-        .catch((err) => {
-          const message = err instanceof Error ? err.message : String(err);
-          sendResponse({ success: false, error: message });
-        });
-      return true;
-    }
-
     // C. List All Files (Output Directory)
     if (request.action === "LIST_ALL_FILES") {
       listAllFilesFS()
@@ -136,19 +151,7 @@ chrome.runtime.onMessage.addListener(
   }
 );
 
-// --- 2. Focus Helpers ---
-// Only activate tab, do NOT focus window (to avoid interrupting user)
-async function focusTab(tabId?: number, _windowId?: number): Promise<void> {
-  if (typeof tabId !== "number") return;
-  try {
-    // Only activate the tab, don't focus the window
-    await chrome.tabs.update(tabId, { active: true });
-  } catch (err) {
-    console.warn("[Background] Failed to activate tab:", err);
-  }
-}
-
-// --- 3. File System Helpers ---
+// --- 2. File System Helpers ---
 async function getSourceHandle(): Promise<FileSystemDirectoryHandle | null> {
   try {
     const handle = await getHandle<FileSystemDirectoryHandle>("sourceHandle");
@@ -232,8 +235,7 @@ async function waitForDownloadAndRename(
     "settings_downloadTimeout",
     "settings_pollInterval",
     "settings_downloadPollInterval",
-    "settings_downloadStabilityInterval",
-    "settings_focusWindowOnDownload"
+    "settings_downloadStabilityInterval"
   ]);
   const downloadTimeoutSeconds = normalizePositive(
     settings.settings_downloadTimeout,
@@ -241,17 +243,14 @@ async function waitForDownloadAndRename(
   );
   const downloadPollIntervalSeconds = normalizePositive(
     settings.settings_pollInterval ?? settings.settings_downloadPollInterval,
-    2
+    1
   );
   const downloadStabilityIntervalSeconds = normalizePositive(
     settings.settings_pollInterval ??
       settings.settings_downloadStabilityInterval,
     1
   );
-  const focusWindowOnDownload =
-    settings.settings_focusWindowOnDownload !== false;
-  const focusTabId = tabInfo?.tabId;
-  const focusWindowId = tabInfo?.windowId;
+  void tabInfo;
 
   if (!sourceHandle || !outputHandle) {
     return {
@@ -272,10 +271,6 @@ async function waitForDownloadAndRename(
     `[Background] Waiting for new Gemini image to rename as: ${targetFilename}`
   );
 
-  if (focusWindowOnDownload) {
-    await focusTab(focusTabId, focusWindowId);
-  }
-
   // 1. Get initial file list (before download)
   const initialFiles = new Set<string>();
   for await (const entry of sourceValues()) {
@@ -289,7 +284,13 @@ async function waitForDownloadAndRename(
   const startTime = Date.now();
   const timeout = downloadTimeoutSeconds * 1000; // Convert to ms
   const interval = downloadPollIntervalSeconds * 1000;
-  const allowAnyImageAfterMs = 10000;
+  const allowAnyImageAfterMs = Math.min(
+    downloadTimeoutSeconds * 1000,
+    Math.max(
+      Math.round(downloadTimeoutSeconds * 1000 * 0.1),
+      downloadPollIntervalSeconds * 1000 * 5
+    )
+  );
   let allowAnyImageLogged = false;
 
   while (Date.now() - startTime < timeout) {
