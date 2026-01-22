@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Gemini Auto Image Generator",
-  "version": "4.7.0",
+  "version": "4.7.1",
   "description": "Auto generate & download high-res images from Gemini with precise control",
   "permissions": [
     "activeTab",

@@ -4,16 +4,16 @@ type TimingSettings = {
   settings_generationTimeout?: number;
   settings_downloadTimeout?: number;
   settings_pageLoadTimeout?: number;
+  settings_inputTimeout?: number;
   settings_stepDelay?: number;
   settings_taskInterval?: number;
-  settings_tabReadyDelay?: number;
   settings_pollInterval?: number;
   settings_inputPollInterval?: number;
   settings_sendPollInterval?: number;
   settings_generationPollInterval?: number;
   settings_downloadPollInterval?: number;
   settings_downloadStabilityInterval?: number;
-  settings_focusWindowOnDownload?: boolean;
+  settings_maxRetries?: number;
   outputSubfolder?: string;
   sourceSubfolder?: string;
 };
@@ -60,18 +60,18 @@ const downloadTimeoutInput = document.getElementById(
 const pageLoadTimeoutInput = document.getElementById(
   "pageLoadTimeout"
 ) as HTMLInputElement;
+const inputTimeoutInput = document.getElementById(
+  "inputTimeout"
+) as HTMLInputElement;
 const stepDelayInput = document.getElementById("stepDelay") as HTMLInputElement;
 const taskIntervalInput = document.getElementById(
   "taskInterval"
 ) as HTMLInputElement;
-const tabReadyDelayInput = document.getElementById(
-  "tabReadyDelay"
-) as HTMLInputElement;
 const pollIntervalInput = document.getElementById(
   "pollInterval"
 ) as HTMLInputElement;
-const focusWindowOnDownloadInput = document.getElementById(
-  "focusWindowOnDownload"
+const maxRetriesInput = document.getElementById(
+  "maxRetries"
 ) as HTMLInputElement;
 const saveSettingsBtn = document.getElementById(
   "saveSettingsBtn"
@@ -83,11 +83,11 @@ const DEFAULTS = {
   settings_generationTimeout: 300,
   settings_downloadTimeout: 120,
   settings_pageLoadTimeout: 30,
+  settings_inputTimeout: 5,
   settings_stepDelay: 1,
-  settings_taskInterval: 2,
-  settings_tabReadyDelay: 1.5,
+  settings_taskInterval: 5,
   settings_pollInterval: 1,
-  settings_focusWindowOnDownload: true
+  settings_maxRetries: 3
 };
 
 // Load saved settings
@@ -98,16 +98,16 @@ async function loadSettings() {
     "settings_generationTimeout",
     "settings_downloadTimeout",
     "settings_pageLoadTimeout",
+    "settings_inputTimeout",
     "settings_stepDelay",
     "settings_taskInterval",
-    "settings_tabReadyDelay",
     "settings_pollInterval",
     "settings_inputPollInterval",
     "settings_sendPollInterval",
     "settings_generationPollInterval",
     "settings_downloadPollInterval",
     "settings_downloadStabilityInterval",
-    "settings_focusWindowOnDownload"
+    "settings_maxRetries"
   ]);
 
   // Set Timing Inputs (or defaults)
@@ -120,14 +120,14 @@ async function loadSettings() {
   pageLoadTimeoutInput.value = String(
     result.settings_pageLoadTimeout ?? DEFAULTS.settings_pageLoadTimeout
   );
+  inputTimeoutInput.value = String(
+    result.settings_inputTimeout ?? DEFAULTS.settings_inputTimeout
+  );
   stepDelayInput.value = String(
     result.settings_stepDelay ?? DEFAULTS.settings_stepDelay
   );
   taskIntervalInput.value = String(
     result.settings_taskInterval ?? DEFAULTS.settings_taskInterval
-  );
-  tabReadyDelayInput.value = String(
-    result.settings_tabReadyDelay ?? DEFAULTS.settings_tabReadyDelay
   );
   const fallbackPollInterval =
     result.settings_pollInterval ??
@@ -138,9 +138,9 @@ async function loadSettings() {
     result.settings_downloadStabilityInterval ??
     DEFAULTS.settings_pollInterval;
   pollIntervalInput.value = String(fallbackPollInterval);
-  focusWindowOnDownloadInput.checked =
-    result.settings_focusWindowOnDownload ??
-    DEFAULTS.settings_focusWindowOnDownload;
+  maxRetriesInput.value = String(
+    result.settings_maxRetries ?? DEFAULTS.settings_maxRetries
+  );
 
   // Check Source Handle
   const sourceHandle = await getHandle<FileSystemDirectoryHandle>("sourceHandle");
@@ -167,6 +167,12 @@ function toSecondsNumber(value: string, fallback: number) {
   return parsed;
 }
 
+function toCountNumber(value: string, fallback: number) {
+  const parsed = Number.parseInt(value, 10);
+  if (Number.isNaN(parsed) || parsed < 0) return fallback;
+  return parsed;
+}
+
 // Save Timing Settings
 saveSettingsBtn.addEventListener("click", async () => {
   try {
@@ -183,6 +189,10 @@ saveSettingsBtn.addEventListener("click", async () => {
         pageLoadTimeoutInput.value,
         DEFAULTS.settings_pageLoadTimeout
       ),
+      settings_inputTimeout: toSecondsNumber(
+        inputTimeoutInput.value,
+        DEFAULTS.settings_inputTimeout
+      ),
       settings_stepDelay: toSecondsNumber(
         stepDelayInput.value,
         DEFAULTS.settings_stepDelay
@@ -191,15 +201,14 @@ saveSettingsBtn.addEventListener("click", async () => {
         taskIntervalInput.value,
         DEFAULTS.settings_taskInterval
       ),
-      settings_tabReadyDelay: toSecondsNumber(
-        tabReadyDelayInput.value,
-        DEFAULTS.settings_tabReadyDelay
-      ),
       settings_pollInterval: toSecondsNumber(
         pollIntervalInput.value,
         DEFAULTS.settings_pollInterval
       ),
-      settings_focusWindowOnDownload: focusWindowOnDownloadInput.checked
+      settings_maxRetries: toCountNumber(
+        maxRetriesInput.value,
+        DEFAULTS.settings_maxRetries
+      )
     };
 
     await storageSet(settings);

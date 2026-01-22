@@ -5,13 +5,63 @@
     <meta charset="UTF-8">
     <title>Gemini AutoGen</title>
     <style>
+        html, body {
+            height: 100%;
+        }
+
+        :root {
+            --bg: #ffffff;
+            --text: #1f1f1f;
+            --muted: #666666;
+            --panel-bg: #fafafa;
+            --panel-border: #e0e0e0;
+            --status-bg: #f0f0f0;
+            --button-bg: #f1f3f4;
+            --button-border: #dadce0;
+            --primary: #1a73e8;
+            --danger: #f44336;
+            --success: #4caf50;
+            --warning: #ff9800;
+            --link: #1a73e8;
+            --progress-bg: #ddd;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #111315;
+                --text: #e6e6e6;
+                --muted: #a0a0a0;
+                --panel-bg: #1a1d20;
+                --panel-border: #2a2f35;
+                --status-bg: #1e2226;
+                --button-bg: #23272b;
+                --button-border: #363b42;
+                --primary: #6aa5ff;
+                --danger: #ff6b6b;
+                --success: #58d68d;
+                --warning: #ffb54d;
+                --link: #7fb0ff;
+                --progress-bg: #2a2f35;
+            }
+        }
+
         body {
             font-family: sans-serif;
-            padding: 10px;
+            margin: 0;
+            padding: 14px 18px;
             width: 100%;
             min-width: 300px;
+            height: 100vh;
+            display: flex;
             box-sizing: border-box;
-            overflow-x: hidden;
+            overflow: hidden;
+            background: var(--bg);
+            color: var(--text);
+        }
+
+        h3 {
+            margin: 0;
+            color: var(--text);
         }
 
         * {
@@ -21,8 +71,10 @@
         .container {
             display: flex;
             flex-direction: column;
-            gap: 10px;
+            gap: 14px;
             width: 100%;
+            flex: 1;
+            min-height: 0;
         }
 
         textarea {
@@ -30,23 +82,77 @@
             height: 150px;
             resize: vertical;
             padding: 5px;
+            background: var(--bg);
+            color: var(--text);
+            border: 1px solid var(--panel-border);
         }
 
         button {
             padding: 8px;
             cursor: pointer;
+            color: var(--text);
         }
 
         .status-bar {
             margin-top: 10px;
-            padding: 5px;
-            background: #f0f0f0;
+            padding: 10px;
+            background: var(--status-bg);
             border-radius: 4px;
+        }
+
+        .log-panel {
+            border: 1px solid var(--panel-border);
+            border-radius: 4px;
+            background: var(--panel-bg);
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            min-height: 0;
+        }
+
+        .log-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 12px;
+            color: var(--muted);
+            margin-bottom: 8px;
+        }
+
+        .log-actions {
+            display: flex;
+            gap: 6px;
+        }
+
+        .log-btn {
+            padding: 2px 6px;
+            font-size: 11px;
+            background: var(--button-bg);
+            color: var(--text);
+            border: 1px solid var(--button-border);
+            border-radius: 4px;
+        }
+
+        .log-output {
+            flex: 1;
+            min-height: 0;
+            overflow-y: auto;
+            font-size: 11px;
+            line-height: 1.4;
+            color: var(--text);
+            white-space: pre-wrap;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+                "Liberation Mono", "Courier New", monospace;
+            background: var(--bg);
+            border: 1px solid var(--panel-border);
+            border-radius: 4px;
+            padding: 8px;
         }
 
         .progress-container {
             width: 100%;
-            background: #ddd;
+            background: var(--progress-bg);
             height: 10px;
             border-radius: 5px;
             overflow: hidden;
@@ -55,7 +161,7 @@
 
         .progress-bar {
             height: 100%;
-            background: #4caf50;
+            background: var(--success);
             width: 0%;
             transition: width 0.3s;
         }
@@ -64,7 +170,7 @@
             display: flex;
             justify-content: space-between;
             font-size: 12px;
-            color: #666;
+            color: var(--muted);
         }
 
         .error {
@@ -91,32 +197,32 @@
         <div style="display: flex; justify-content: space-between; align-items: center;">
             <h3>Gemini AutoGen</h3>
             <button id="settingsBtn"
-                style="padding: 4px 8px; font-size: 12px; background: #eee; color: #333; border: 1px solid #ccc; border-radius: 4px;">⚙️
+                style="padding: 6px 10px; font-size: 12px; background: var(--button-bg); color: var(--text); border: 1px solid var(--button-border); border-radius: 4px;">⚙️
                 Settings</button>
         </div>
 
         <!-- Conversation URL Lock -->
-        <div style="border: 1px solid #e0e0e0; padding: 10px; border-radius: 4px; background: #fafafa;">
-            <label style="display: block; font-size: 12px; color: #555; margin-bottom: 5px;">🔒 Locked Conversation URL</label>
+        <div style="border: 1px solid var(--panel-border); padding: 12px; border-radius: 4px; background: var(--panel-bg);">
+            <label style="display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px;">🔒 Locked Conversation URL</label>
             <div style="display: flex; gap: 5px;">
                 <input type="text" id="conversationUrlInput" placeholder="Paste Gemini chat URL here..." 
-                    style="flex: 1; padding: 6px 8px; font-size: 12px; border: 1px solid #ccc; border-radius: 4px;">
-                <button id="lockUrlBtn" style="padding: 6px 10px; font-size: 11px; background: #1a73e8; color: white; border: none; border-radius: 4px;">Lock</button>
-                <button id="clearUrlBtn" style="padding: 6px 10px; font-size: 11px; background: #f44336; color: white; border: none; border-radius: 4px;">Clear</button>
+                    style="flex: 1; padding: 7px 9px; font-size: 12px; border: 1px solid var(--panel-border); border-radius: 4px; background: var(--bg); color: var(--text);">
+                <button id="lockUrlBtn" style="padding: 7px 12px; font-size: 11px; background: var(--primary); color: white; border: none; border-radius: 4px;">Lock</button>
+                <button id="clearUrlBtn" style="padding: 7px 12px; font-size: 11px; background: var(--danger); color: white; border: none; border-radius: 4px;">Clear</button>
             </div>
-            <div id="urlStatus" style="margin-top: 5px; font-size: 11px; color: #999;">No URL locked</div>
+            <div id="urlStatus" style="margin-top: 6px; font-size: 11px; color: var(--muted);">No URL locked</div>
         </div>
 
-        <div style="border: 1px dashed #ccc; padding: 10px; text-align: center; border-radius: 4px;">
+        <div style="border: 1px dashed var(--panel-border); padding: 12px; text-align: center; border-radius: 4px;">
             <input type="file" id="jsonFile" accept=".json,.txt" style="width: 100%;">
-            <div id="fileInfo" style="margin-top: 5px; font-size: 12px; color: #666;">No file loaded</div>
+            <div id="fileInfo" style="margin-top: 6px; font-size: 12px; color: var(--muted);">No file loaded</div>
         </div>
 
         <div style="display: flex; gap: 10px;">
-            <button id="startBtn" style="flex: 1; background: #4caf50; color: white; border: none;">Start</button>
-            <button id="stopBtn" style="flex: 1; background: #f44336; color: white; border: none;"
+            <button id="startBtn" style="flex: 1; background: var(--success); color: white; border: none; padding: 10px 8px;">Start</button>
+            <button id="stopBtn" style="flex: 1; background: var(--danger); color: white; border: none; padding: 10px 8px;"
                 disabled>Stop</button>
-            <button id="resetBtn" style="flex: 0.5; background: #ff9800; color: white; border: none;">Reset</button>
+            <button id="resetBtn" style="flex: 1; background: var(--warning); color: white; border: none; padding: 10px 8px;">Reset</button>
         </div>
 
         <div class="status-bar">
@@ -128,7 +234,18 @@
                 <div id="progressBar" class="progress-bar"></div>
             </div>
             <div id="statusText" style="margin-top: 5px; font-size: 13px;">Ready</div>
-            <div id="currentFileName" style="margin-top: 3px; font-size: 12px; color: #1a73e8; font-weight: 500;"></div>
+            <div id="currentFileName" style="margin-top: 4px; font-size: 12px; color: var(--link); font-weight: 500;"></div>
+        </div>
+
+        <div class="log-panel">
+            <div class="log-header">
+                <span>Log</span>
+                <div class="log-actions">
+                    <button id="logCopyBtn" class="log-btn">Copy</button>
+                    <button id="logClearBtn" class="log-btn">Clear</button>
+                </div>
+            </div>
+            <div id="logOutput" class="log-output"></div>
         </div>
     </div>
     <script src="sidepanel.js"></script>
