@@ -22,7 +22,6 @@ type WaitAndRenameResponse = {
 };
 
 type ContentMessage =
-  | { action: "FOCUS_TAB" }
   | { action: "CHECK_FILE_EXISTS"; filename: string }
   | { action: "WAIT_AND_RENAME"; targetFilename: string }
   | { action: "TASK_COMPLETE"; skipped: boolean }
@@ -99,7 +98,7 @@ const logError = (message: string, data?: unknown) =>
     pollIntervalSeconds > 0 ? pollIntervalSeconds : 1;
   const CONFIG_POLL = normalizedPollIntervalSeconds * 1000;
 
-  await runtimeSendMessage<void>({ action: "FOCUS_TAB" }).catch(() => {});
+  // No longer focus tab/window - only use element focus to avoid interrupting user
 
   // --- Helpers ---
   const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -143,6 +142,40 @@ const logError = (message: string, data?: unknown) =>
     return true;
   }
 
+  function getResponseReadyState(container: Element) {
+    const busyElement = container.querySelector<HTMLElement>("[aria-busy]");
+    const ariaBusy = busyElement?.getAttribute("aria-busy") || "";
+    
+    // Check for actual loading indicators, NOT ".processing-state-visible" 
+    // which is a persistent UI class that stays even after generation is done
+    const footer = container.querySelector<HTMLElement>(".response-footer");
+    const footerComplete = footer ? footer.classList.contains("complete") : null;
+    const loader = container.querySelector<HTMLElement>(".generated-image .loader");
+    const hasVisibleLoader = loader ? isVisible(loader) : false;
+    
+    // Check if there's an image with the "loaded" class (Gemini's indicator for ready images)
+    const loadedImage = container.querySelector<HTMLImageElement>('img.loaded');
+    const hasLoadedImage = loadedImage !== null;
+    
+    // Ready when:
+    // 1. Not aria-busy
+    // 2. Footer is complete (if exists)
+    // 3. No visible loader
+    // 4. Has a loaded image OR footer is complete
+    const ready =
+      ariaBusy !== "true" &&
+      (footerComplete !== false) &&
+      !hasVisibleLoader &&
+      (hasLoadedImage || footerComplete === true);
+    return {
+      ready,
+      ariaBusy,
+      footerComplete,
+      hasVisibleLoader,
+      hasLoadedImage
+    };
+  }
+
   function describeButton(button: HTMLButtonElement) {
     const style = window.getComputedStyle(button);
     return {
@@ -175,6 +208,10 @@ const logError = (message: string, data?: unknown) =>
       visibility: style.visibility,
       opacity: style.opacity
     };
+  }
+
+  function getImageSrc(img: HTMLImageElement) {
+    return img.currentSrc || img.src || "";
   }
 
   function fireMouseEvent(target: Element, type: string) {
@@ -272,6 +309,86 @@ const logError = (message: string, data?: unknown) =>
 
   function normalizeText(text: string) {
     return (text || "").replace(/\s+/g, " ").trim();
+  }
+
+  function userQueryMatchesPrompt(
+    query: Element | null,
+    promptText: string,
+    fullPrompt: string
+  ) {
+    if (!query) return false;
+    const text = normalizeText(query.textContent || "").toLowerCase();
+    const target = normalizeText(promptText).toLowerCase();
+    const fullTarget = normalizeText(fullPrompt).toLowerCase();
+    if (target && text.includes(target)) return true;
+    if (fullTarget && text.includes(fullTarget)) return true;
+    return false;
+  }
+
+  function getDownloadMenuItemLabel(element: HTMLElement) {
+    return (
+      element.getAttribute("aria-label") ||
+      element.getAttribute("mattooltip") ||
+      element.textContent ||
+      ""
+    );
+  }
+
+  function isDownloadMenuLabel(label: string) {
+    const normalized = normalizeText(label).toLowerCase();
+    if (!normalized) return false;
+    if (!normalized.includes("download")) return false;
+    if (normalized.includes("copy") || normalized.includes("share")) return false;
+    return true;
+  }
+
+  function getDownloadMenuItem() {
+    const selectors = [
+      "button[role=\"menuitem\"]",
+      "[role=\"menuitem\"]",
+      "button[mat-menu-item]",
+      ".mat-mdc-menu-item",
+      "button[aria-label*='Download']",
+      "button[mattooltip*='Download']",
+      "button[data-test-id*='download']",
+      "a[download]"
+    ];
+    const candidates = new Set<HTMLElement>();
+    const roots: ParentNode[] = [document];
+    const overlay = document.querySelector<HTMLElement>(".cdk-overlay-container");
+    if (overlay) {
+      roots.unshift(overlay);
+    }
+    for (const root of roots) {
+      for (const selector of selectors) {
+        root
+          .querySelectorAll<HTMLElement>(selector)
+          .forEach((el) => candidates.add(el));
+      }
+    }
+    for (const candidate of candidates) {
+      if (candidate instanceof HTMLAnchorElement && candidate.hasAttribute("download")) {
+        return candidate;
+      }
+      const label = getDownloadMenuItemLabel(candidate);
+      if (isDownloadMenuLabel(label)) return candidate;
+    }
+    return null;
+  }
+
+  async function clickDownloadMenuItem() {
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const menuItem = getDownloadMenuItem();
+      if (menuItem && isVisible(menuItem)) {
+        logInfo("[Content] Download menu item detected", {
+          label: getDownloadMenuItemLabel(menuItem)
+        });
+        menuItem.click();
+        return true;
+      }
+      await wait(150);
+    }
+    return false;
   }
 
   async function writePrompt(inputField: HTMLElement | null, prompt: string) {
@@ -379,25 +496,115 @@ const logError = (message: string, data?: unknown) =>
     return null;
   }
 
-  function getResponseContainerForAnchor(anchor: Element | null) {
-    if (!anchor) return null;
-    const userQuery = anchor.closest("user-query");
-    if (!userQuery) return null;
-    let next = userQuery.nextElementSibling as Element | null;
-    while (next) {
-      if (next.matches("model-response")) {
-        return (
-          next.querySelector<HTMLElement>(".response-container") ||
-          (next as HTMLElement)
-        );
+  /**
+   * Find conversation container by matching prompt/name text in user-query
+   * Returns the LAST matching conversation (most recent)
+   */
+  function findConversationByPrompt(promptText: string, nameText: string) {
+    const containers = Array.from(
+      document.querySelectorAll<HTMLElement>(".conversation-container")
+    );
+    const targetName = normalizeText(nameText).toLowerCase();
+    const targetPrompt = normalizeText(promptText).toLowerCase();
+    
+    let lastMatch: { container: HTMLElement; userQuery: HTMLElement } | null = null;
+    
+    // Iterate through ALL containers and keep the LAST match (most recent)
+    for (const container of containers) {
+      const userQuery = container.querySelector("user-query");
+      if (!userQuery) continue;
+      const text = normalizeText(userQuery.textContent || "").toLowerCase();
+      
+      // Match by name (more specific) or full prompt
+      if (targetName && text.includes(targetName)) {
+        lastMatch = { container, userQuery: userQuery as HTMLElement };
+      } else if (targetPrompt && text.includes(targetPrompt)) {
+        lastMatch = { container, userQuery: userQuery as HTMLElement };
       }
-      const response = next.querySelector<HTMLElement>(
-        ".response-container"
-      );
-      if (response) return response;
-      next = next.nextElementSibling as Element | null;
+    }
+    return lastMatch;
+  }
+
+  /**
+   * Wait for a new conversation container to appear that matches the prompt
+   */
+  async function waitForConversationContainer(
+    promptText: string,
+    nameText: string,
+    afterContainerId: string | null,
+    timeout: number,
+    pollInterval: number
+  ): Promise<{ container: HTMLElement; userQuery: HTMLElement } | null> {
+    const start = Date.now();
+    while (Date.now() - start < timeout) {
+      const match = findConversationByPrompt(promptText, nameText);
+      if (match) {
+        // If we have an "after" container ID, make sure this is a NEW container
+        if (afterContainerId) {
+          if (match.container.id !== afterContainerId) {
+            return match;
+          }
+        } else {
+          return match;
+        }
+      }
+      await wait(pollInterval);
     }
     return null;
+  }
+
+  /**
+   * Check if image is fully loaded (via class or complete property)
+   */
+  function isImageLoaded(img: HTMLImageElement): boolean {
+    // Gemini adds 'loaded' class when image is ready
+    if (img.classList.contains("loaded")) return true;
+    // Fallback: check native complete property
+    return img.complete && img.naturalWidth > 0;
+  }
+
+  /**
+   * Get generated images within a container that are fully loaded
+   */
+  function getLoadedImagesInContainer(container: Element): HTMLImageElement[] {
+    const images = Array.from(
+      container.querySelectorAll<HTMLImageElement>(
+        'img[src*="blob:"], img[src*="googleusercontent"], img[alt*="Generated"], generated-image img, single-image img'
+      )
+    );
+    return images.filter((img) => isVisible(img) && isImageLoaded(img) && img.width > 100);
+  }
+
+  /**
+   * Get download button within a conversation/response container
+   */
+  function getDownloadButtonInConversation(container: Element): HTMLButtonElement | null {
+    const selectors = [
+      'download-generated-image-button button',
+      'button[data-test-id="download-generated-image-button"]',
+      'button[aria-label="Download full size image"]',
+      'button[mattooltip="Download full size"]',
+      'button[aria-label*="Download"]',
+      'button[mattooltip*="Download"]'
+    ];
+    for (const selector of selectors) {
+      const btn = container.querySelector<HTMLButtonElement>(selector);
+      if (btn && isButtonEnabled(btn)) return btn;
+    }
+    return null;
+  }
+
+  function getResponseContainerForAnchor(anchor: Element | null) {
+    if (!anchor) return null;
+    const responseSelector =
+      ".presented-response-container, model-response, .response-container, .response-container-content, .response-content";
+    const candidates = Array.from(
+      document.querySelectorAll<HTMLElement>(responseSelector)
+    );
+    const after = getElementsAfterAnchor(candidates, anchor);
+    if (!after.length) return null;
+    const first = after[0];
+    return first.closest<HTMLElement>(".presented-response-container") || first;
   }
 
   function findPromptAnchor(promptText: string) {
@@ -428,6 +635,20 @@ const logError = (message: string, data?: unknown) =>
     return found;
   }
 
+  function findUserQueryByPromptText(promptText: string) {
+    const target = normalizeText(promptText).toLowerCase();
+    if (!target) return null;
+    const queries = Array.from(document.querySelectorAll<HTMLElement>("user-query"));
+    let matched: HTMLElement | null = null;
+    for (const query of queries) {
+      const text = normalizeText(query.textContent || "").toLowerCase();
+      if (text.includes(target)) {
+        matched = query;
+      }
+    }
+    return matched;
+  }
+
   function getElementsAfterAnchor<T extends Element>(
     elements: T[],
     anchor: Element | null
@@ -435,6 +656,15 @@ const logError = (message: string, data?: unknown) =>
     if (!anchor) return elements;
     return elements.filter(
       (el) => anchor.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING
+    );
+  }
+
+  function isElementAfterAnchor(anchor: Element | null, element: Element | null) {
+    if (!element) return false;
+    if (!anchor) return true;
+    if (element.contains(anchor)) return true;
+    return Boolean(
+      anchor.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING
     );
   }
 
@@ -452,21 +682,14 @@ const logError = (message: string, data?: unknown) =>
     return getDownloadBtns(includeHidden, container);
   }
 
-  function getDownloadButtonNearLastImage(
-    anchor: Element | null,
-    container?: Element | null
-  ) {
-    const images = container
-      ? getGeneratedImages(container)
-      : getGeneratedImagesAfterAnchor(anchor);
-    const lastImage = images[images.length - 1];
-    if (!lastImage) return null;
-    const containerEl = lastImage.closest(
-      ".attachment-container, .generated-images, .response-container, .overlay-container"
+  function getDownloadButtonForImage(image: HTMLImageElement | null) {
+    if (!image) return null;
+    const containerEl = image.closest(
+      ".attachment-container, .generated-images, .response-container, .overlay-container, .image-container"
     );
     if (!containerEl) return null;
     const button = containerEl.querySelector<HTMLButtonElement>(
-      "download-generated-image-button button, button[data-test-id=\"download-generated-image-button\"]"
+      "download-generated-image-button button, button[data-test-id=\"download-generated-image-button\"], button[aria-label*=\"Download\"], button[mattooltip*=\"Download\"]"
     );
     return button || null;
   }
@@ -673,8 +896,6 @@ const logError = (message: string, data?: unknown) =>
 
     const initialGlobalDownloadBtnCount = getDownloadBtns(true).length;
     const initialGlobalImageCount = getGeneratedImages().length;
-    let initialDownloadBtnCount = initialGlobalDownloadBtnCount;
-    let initialImageCount = initialGlobalImageCount;
 
     const userQueriesBeforeSend = Array.from(
       document.querySelectorAll("user-query")
@@ -687,6 +908,22 @@ const logError = (message: string, data?: unknown) =>
     const initialConversationCount = document.querySelectorAll(
       ".conversation-container"
     ).length;
+    
+    // CRITICAL: Record the ID of the last conversation container BEFORE sending
+    // This ensures we wait for a NEW container and don't use old ones
+    const containersBeforeSend = Array.from(
+      document.querySelectorAll<HTMLElement>(".conversation-container")
+    );
+    const lastContainerBeforeSend = containersBeforeSend.length > 0
+      ? containersBeforeSend[containersBeforeSend.length - 1]
+      : null;
+    const lastContainerIdBeforeSend = lastContainerBeforeSend?.id || null;
+    
+    logInfo("[Content] Container state before send", {
+      containerCount: containersBeforeSend.length,
+      lastContainerId: lastContainerIdBeforeSend || "(none)",
+      lastContainerClass: lastContainerBeforeSend?.className.slice(0, 50) || "(none)"
+    });
 
     await wait(CONFIG_STEP_DELAY / 2);
     sendButton.click();
@@ -765,10 +1002,14 @@ const logError = (message: string, data?: unknown) =>
       }
     }
 
-    let promptAnchor =
-      latestUserQuery ||
-      findPromptAnchor(promptAnchorText) ||
-      findPromptAnchor(composedPrompt);
+    const namedUserQuery: Element | null =
+      findUserQueryByPromptText(promptAnchorText) ||
+      findUserQueryByPromptText(composedPrompt);
+    let promptAnchor: Element | null =
+      userQueryMatchesPrompt(latestUserQuery, promptAnchorText, composedPrompt)
+        ? latestUserQuery
+        : null;
+    promptAnchor = promptAnchor ?? namedUserQuery;
     if (
       promptAnchor &&
       lastUserQueryBeforeSend &&
@@ -788,50 +1029,21 @@ const logError = (message: string, data?: unknown) =>
       userQueryCount: document.querySelectorAll("user-query").length,
       hasNewConversationContainer
     });
-    if (!promptAnchor && !hasNewConversationContainer) {
+    if (!promptAnchor) {
       throw new Error(
         "Prompt anchor not found; aborting to avoid downloading the wrong image"
       );
     }
-    const conversationContainer =
-      (hasNewConversationContainer ? latestConversationContainer : null) ||
-      getConversationContainer(promptAnchor);
-    let responseContainer =
-      (conversationContainer
-        ? conversationContainer.querySelector<HTMLElement>(".response-container")
-        : null) ||
-      (promptAnchor ? getResponseContainerForAnchor(promptAnchor) : null) ||
-      conversationContainer;
+    let responseContainer: Element | null = getResponseContainerForAnchor(promptAnchor);
     const resolveResponseContainer = () => {
-      const anchor = latestUserQuery || promptAnchor;
-      const anchoredResponse = getResponseContainerForAnchor(anchor);
-      if (anchoredResponse) return anchoredResponse;
-      const anchoredConversation = getConversationContainer(anchor);
-      if (anchoredConversation) {
-        return (
-          anchoredConversation.querySelector<HTMLElement>(".response-container") ||
-          anchoredConversation
-        );
-      }
-      if (hasNewConversationContainer && latestConversationContainer) {
-        return (
-          latestConversationContainer.querySelector<HTMLElement>(
-            ".response-container"
-          ) || latestConversationContainer
-        );
-      }
-      return null;
+      return promptAnchor ? getResponseContainerForAnchor(promptAnchor) : null;
     };
     logInfo("[Content] Response container found", {
       found: Boolean(responseContainer),
       className: responseContainer?.className || "(none)"
     });
-    if (responseContainer) {
-      initialDownloadBtnCount =
-        getDownloadButtonsInContainer(responseContainer, true).length;
-      initialImageCount = getGeneratedImages(responseContainer).length;
-    } else {
-      logWarn("[Content] No response container; using anchor fallback");
+    if (!responseContainer) {
+      logWarn("[Content] Response container not available yet");
     }
 
     // 7. Wait for generation
@@ -840,100 +1052,184 @@ const logError = (message: string, data?: unknown) =>
     // CRITICAL: Record counts BEFORE sending prompt
     // This prevents detecting old buttons/images from previous responses
     logInfo("[Content] Initial counts before prompt", {
-      btns: initialDownloadBtnCount,
-      images: initialImageCount,
       globalButtons: initialGlobalDownloadBtnCount,
       globalImages: initialGlobalImageCount
     });
 
     let pollTick = 0;
     let latestDownloadButtons: HTMLButtonElement[] = [];
+    let latestNewImages: HTMLImageElement[] = [];
+    let responseBaselineSrcs = new Set<string>();
+    let baselineReady = false;
+    
+    // Track which container we're using - must be a NEW container (different ID from before send)
+    let conversationMatch: { container: HTMLElement; userQuery: HTMLElement } | null = null;
+    let confirmedNewContainerId: string | null = null;
+    
     await waitFor(
       () => {
         pollTick += 1;
+        
+        // Find conversation by prompt/name - but ONLY accept containers that are NEW
+        // (i.e., have a different ID than the last container before we sent the prompt)
+        if (!conversationMatch || !confirmedNewContainerId) {
+          const match = findConversationByPrompt(task.prompt, filename);
+          if (match) {
+            const matchId = match.container.id || "";
+            
+            // Check if this is a NEW container (different from before send)
+            const isNewContainer = !lastContainerIdBeforeSend || matchId !== lastContainerIdBeforeSend;
+            
+            if (isNewContainer && matchId) {
+              // Confirm this is our new container
+              if (confirmedNewContainerId && confirmedNewContainerId !== matchId) {
+                // Container ID changed again - reset baseline
+                logWarn("[Content] Container ID changed mid-poll", {
+                  oldId: confirmedNewContainerId,
+                  newId: matchId
+                });
+                responseBaselineSrcs = new Set<string>();
+                baselineReady = false;
+              }
+              
+              if (!confirmedNewContainerId) {
+                logInfo("[Content] Found NEW conversation container", {
+                  containerId: matchId,
+                  lastContainerIdBeforeSend: lastContainerIdBeforeSend || "(none)",
+                  containerClass: match.container.className.slice(0, 50)
+                });
+              }
+              
+              confirmedNewContainerId = matchId;
+              conversationMatch = match;
+            } else if (!isNewContainer && pollTick % 10 === 0) {
+              logInfo("[Content] Found container but it's the OLD one, waiting for new", {
+                matchId,
+                lastContainerIdBeforeSend
+              });
+            }
+          }
+        }
+        
         const globalButtons = getDownloadBtns(true);
         const globalImages = getGeneratedImages().filter(
-          (img) => img.complete && img.naturalWidth > 0
+          (img) => isImageLoaded(img)
         );
         const hasNewGlobalContent =
           globalButtons.length > initialGlobalDownloadBtnCount ||
           globalImages.length > initialGlobalImageCount;
-        if (!hasNewGlobalContent) {
-          if (pollTick % 5 === 0) {
-            logInfo("[Content] Waiting for new global content", {
-              globalButtons: globalButtons.length,
-              globalImages: globalImages.length,
-              initialGlobalButtons: initialGlobalDownloadBtnCount,
-              initialGlobalImages: initialGlobalImageCount
-            });
-          }
-          return false;
+        const resolvedContainer = resolveResponseContainer();
+        if (resolvedContainer && resolvedContainer !== responseContainer) {
+          responseContainer = resolvedContainer;
+          responseBaselineSrcs = new Set<string>();
+          baselineReady = false;
         }
         if (responseContainer && !responseContainer.isConnected) {
-          responseContainer = resolveResponseContainer();
+          responseContainer = null;
         }
-        if (responseContainer) {
-          const scopedButtons = getDownloadButtonsInContainer(
-            responseContainer,
-            true
-          );
-          const scopedImageCandidates =
-            getGeneratedImageCandidates(responseContainer);
-          const scopedVisibleImages = scopedImageCandidates.filter((img) =>
-            isVisible(img)
-          );
-          const scopedLargeImages = scopedVisibleImages.filter(
-            (img) => img.width > 100
-          );
-          const scopedImages = scopedLargeImages.filter(
-            (img) => img.complete && img.naturalWidth > 0
-          );
-          latestDownloadButtons = scopedButtons;
+        
+        // Prefer conversation container found by prompt/name
+        const targetContainer = conversationMatch?.container || responseContainer;
+        
+        if (!targetContainer) {
           if (pollTick % 5 === 0) {
-            logInfo("[Content] Download button poll", {
-              scopedButtons: scopedButtons.length,
-              scopedImages: scopedImages.length,
-              scopedImageCandidates: scopedImageCandidates.length,
-              scopedVisibleImages: scopedVisibleImages.length,
-              scopedLargeImages: scopedLargeImages.length,
-              scopedLoadedImages: scopedImages.length,
-              responseConnected: responseContainer.isConnected,
-              responseClass: responseContainer.className || "(none)",
-              sampleImage: scopedImageCandidates.length
-                ? describeImage(
-                    scopedImageCandidates[scopedImageCandidates.length - 1]
-                  )
-                : null
+            logInfo("[Content] Waiting for response container", {
+              globalButtons: globalButtons.length,
+              globalImages: globalImages.length
             });
-          }
-          if (scopedButtons.length > 0 && scopedImages.length > 0) {
-            return true;
-          }
-          const anchorButtons = getDownloadButtonsAfterAnchor(promptAnchor, true);
-          const anchorImages = getGeneratedImagesAfterAnchor(promptAnchor).filter(
-            (img) => img.complete && img.naturalWidth > 0
-          );
-          if (anchorButtons.length > 0 && anchorImages.length > 0) {
-            latestDownloadButtons = anchorButtons;
-            if (pollTick % 5 === 0) {
-              logInfo("[Content] Download button poll (anchor)", {
-                anchorButtons: anchorButtons.length,
-                anchorImages: anchorImages.length
-              });
-            }
-            return true;
           }
           return false;
         }
-
-        const anchorButtons = getDownloadButtonsAfterAnchor(promptAnchor, true);
-        latestDownloadButtons = anchorButtons;
+        if (!baselineReady) {
+          getGeneratedImageCandidates(targetContainer).forEach((img) => {
+            const src = getImageSrc(img);
+            if (src) responseBaselineSrcs.add(src);
+          });
+          baselineReady = true;
+        }
+        const responseState = getResponseReadyState(targetContainer);
+        if (!responseState.ready) {
+          if (pollTick % 5 === 0) {
+            logInfo("[Content] Waiting for response ready", responseState);
+          }
+          return false;
+        }
+        
+        // Use new helper to get loaded images in container
+        const loadedImages = getLoadedImagesInContainer(targetContainer);
+        
+        let scopedButtons: HTMLButtonElement[] = [];
+        let scopedImageCandidates: HTMLImageElement[] = [];
+        let scopedVisibleImages: HTMLImageElement[] = [];
+        let scopedLargeImages: HTMLImageElement[] = [];
+        let scopedImages: HTMLImageElement[] = [];
+        let scopedLoadedImages: HTMLImageElement[] = [];
+        scopedButtons = getDownloadButtonsInContainer(targetContainer, true);
+        scopedImageCandidates = getGeneratedImageCandidates(targetContainer);
+        scopedVisibleImages = scopedImageCandidates.filter((img) => isVisible(img));
+        scopedLargeImages = scopedVisibleImages.filter((img) => img.width > 100);
+        scopedImages = scopedLargeImages.filter(
+          (img) => isImageLoaded(img)
+        );
+        scopedLoadedImages = scopedImageCandidates.filter(
+          (img) => isImageLoaded(img) && img.naturalWidth > 100
+        );
+        latestDownloadButtons = scopedButtons;
+        const newImages = scopedImages.filter((img) => {
+          const src = getImageSrc(img);
+          return src && !responseBaselineSrcs.has(src);
+        });
+        const hasNewImage =
+          newImages.length > 0 ||
+          (responseBaselineSrcs.size === 0 && scopedLoadedImages.length > 0) ||
+          loadedImages.length > 0;
+        latestNewImages = newImages.length > 0 ? newImages : loadedImages;
+        
+        // Also try to get download button via new helper
+        const directDownloadBtn = getDownloadButtonInConversation(targetContainer);
+        if (directDownloadBtn && !scopedButtons.includes(directDownloadBtn)) {
+          scopedButtons.push(directDownloadBtn);
+          latestDownloadButtons = scopedButtons;
+        }
+        
         if (pollTick % 5 === 0) {
           logInfo("[Content] Download button poll", {
-            anchorButtons: anchorButtons.length
+            scopedButtons: scopedButtons.length,
+            scopedImages: scopedImages.length,
+            loadedImages: loadedImages.length,
+            newImages: newImages.length,
+            baselineImages: responseBaselineSrcs.size,
+            scopedImageCandidates: scopedImageCandidates.length,
+            scopedVisibleImages: scopedVisibleImages.length,
+            scopedLargeImages: scopedLargeImages.length,
+            scopedLoadedImages: scopedLoadedImages.length,
+            directDownloadBtn: directDownloadBtn ? describeButton(directDownloadBtn) : null,
+            hasConversationMatch: Boolean(conversationMatch),
+            responseConnected: targetContainer.isConnected,
+            responseClass: targetContainer.className || "(none)",
+            sampleImage: scopedImageCandidates.length
+              ? describeImage(scopedImageCandidates[scopedImageCandidates.length - 1])
+              : null
           });
         }
-        return anchorButtons.length > 0;
+        if (scopedButtons.length > 0 && hasNewImage) {
+          latestDownloadButtons = scopedButtons;
+          // Update responseContainer for later use
+          if (conversationMatch) {
+            responseContainer = conversationMatch.container;
+          }
+          return true;
+        }
+        if (!hasNewGlobalContent && pollTick % 5 === 0) {
+          logInfo("[Content] Waiting for images/buttons", {
+            scopedButtons: scopedButtons.length,
+            scopedImages: scopedImages.length,
+            scopedLoadedImages: scopedLoadedImages.length,
+            globalButtons: globalButtons.length,
+            globalImages: globalImages.length
+          });
+        }
+        return false;
       },
       CONFIG_GEN_TIMEOUT,
       CONFIG_POLL,
@@ -947,61 +1243,91 @@ const logError = (message: string, data?: unknown) =>
 
     // 8. Download
     updateStatus("Downloading...");
-    let downloadBtns = latestDownloadButtons.length
-      ? latestDownloadButtons
-      : responseContainer
-        ? getDownloadButtonsInContainer(responseContainer, true)
-        : promptAnchor
-          ? getDownloadButtonsAfterAnchor(promptAnchor, true)
+    
+    // First try to get download button directly from conversation container
+    let targetBtn: HTMLButtonElement | null = null;
+    
+    // Try the new direct method first
+    if (responseContainer) {
+      targetBtn = getDownloadButtonInConversation(responseContainer);
+      if (targetBtn) {
+        logInfo("[Content] Found download button via getDownloadButtonInConversation", {
+          button: describeButton(targetBtn)
+        });
+      }
+    }
+    
+    // Fallback to previous methods
+    if (!targetBtn) {
+      let downloadBtns = latestDownloadButtons.length
+        ? latestDownloadButtons
+        : responseContainer
+          ? getDownloadButtonsInContainer(responseContainer, true)
           : [];
-    logInfo("[Content] Download buttons after anchor", {
-      count: downloadBtns.length,
-      buttons: downloadBtns.map(describeButton)
-    });
-    if (!downloadBtns.length) {
-      const fallbackButtons = responseContainer
-        ? getDownloadButtonsInContainer(responseContainer, true)
-        : promptAnchor
-          ? getDownloadButtonsAfterAnchor(promptAnchor, true)
+      logInfo("[Content] Download buttons in response", {
+        count: downloadBtns.length,
+        buttons: downloadBtns.map(describeButton)
+      });
+      if (!downloadBtns.length) {
+        const fallbackButtons = responseContainer
+          ? getDownloadButtonsInContainer(responseContainer, true)
           : [];
-      logInfo("[Content] Download buttons including hidden", {
-        count: fallbackButtons.length,
-        buttons: fallbackButtons.map(describeButton)
-      });
-      downloadBtns = fallbackButtons;
-    }
-    if (!downloadBtns.length) {
-      logInfo("[Content] All download buttons on page", {
-        count: getDownloadBtns(true).length,
-        buttons: getDownloadBtns(true).map(describeButton)
-      });
-    }
+        logInfo("[Content] Download buttons including hidden", {
+          count: fallbackButtons.length,
+          buttons: fallbackButtons.map(describeButton)
+        });
+        downloadBtns = fallbackButtons;
+      }
+      if (!downloadBtns.length) {
+        logInfo("[Content] All download buttons on page", {
+          count: getDownloadBtns(true).length,
+          buttons: getDownloadBtns(true).map(describeButton)
+        });
+      }
 
-    const nearestButton = getDownloadButtonNearLastImage(
-      promptAnchor,
-      responseContainer
-    );
-    if (!responseContainer && nearestButton && !downloadBtns.includes(nearestButton)) {
-      downloadBtns.push(nearestButton);
-    }
+      const nearestButton = getDownloadButtonForImage(
+        latestNewImages.length
+          ? latestNewImages[latestNewImages.length - 1]
+          : responseContainer
+            ? getGeneratedImages(responseContainer).slice(-1)[0] || null
+            : null
+      );
+      if (nearestButton && !downloadBtns.includes(nearestButton)) {
+        downloadBtns.push(nearestButton);
+      }
 
-    if (!downloadBtns.length) {
-      throw new Error("No download buttons found after generation");
+      if (!downloadBtns.length) {
+        throw new Error("No download buttons found after generation");
+      }
+      const lastBtn = downloadBtns[downloadBtns.length - 1];
+      targetBtn = nearestButton || lastBtn;
     }
-    const lastBtn = downloadBtns[downloadBtns.length - 1];
+    
+    if (!targetBtn) {
+      throw new Error("No download button found after generation");
+    }
 
     logInfo("[Content] Clicking download", {
       filename,
-      button: describeButton(lastBtn)
+      button: describeButton(targetBtn)
     });
-    revealDownloadButton(lastBtn);
-    await wait(150);
-    if (!isClickable(lastBtn)) {
-      logInfo("[Content] Download button still not clickable, retry hover");
-      revealDownloadButton(lastBtn);
-      await wait(150);
+    
+    // More aggressive reveal: try multiple times with longer waits
+    for (let revealAttempt = 0; revealAttempt < 3; revealAttempt++) {
+      revealDownloadButton(targetBtn);
+      await wait(200);
+      if (isClickable(targetBtn)) {
+        break;
+      }
+      logInfo(`[Content] Download button not clickable yet, attempt ${revealAttempt + 1}`);
     }
-    clickDownloadButton(lastBtn);
+    
+    if (!isClickable(targetBtn)) {
+      logWarn("[Content] Download button still not clickable after multiple reveals, trying anyway");
+    }
+    
+    clickDownloadButton(targetBtn);
+    await clickDownloadMenuItem();
 
     // 9. Wait for download and rename (handled by background.ts)
     updateStatus("Waiting for file...");

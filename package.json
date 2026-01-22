@@ -1,5 +1,6 @@
 {
   "name": "gemini-autogen",
+  "version": "4.7.0",
   "private": true,
   "type": "module",
   "scripts": {

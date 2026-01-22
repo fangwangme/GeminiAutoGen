@@ -116,6 +116,29 @@ document.addEventListener("DOMContentLoaded", async () => {
     console.warn("[Panel] Settings button not found");
   }
 
+  // Click filename to copy (without extension)
+  if (currentFileNameEl) {
+    currentFileNameEl.addEventListener("click", async () => {
+      const text = currentFileNameEl.textContent || "";
+      // Remove emoji prefix like "📷 " and file extension
+      const filename = text.replace(/^[^\w]*/, "").trim();
+      const nameWithoutExt = filename.replace(/\.[^.]+$/, "");
+      if (nameWithoutExt) {
+        try {
+          await navigator.clipboard.writeText(nameWithoutExt);
+          // Brief visual feedback
+          const original = currentFileNameEl.textContent;
+          currentFileNameEl.textContent = "✓ Copied!";
+          setTimeout(() => {
+            currentFileNameEl.textContent = original;
+          }, 800);
+        } catch (err) {
+          console.error("[Panel] Failed to copy:", err);
+        }
+      }
+    });
+  }
+
   // Load saved locked URL
   const urlData = await storageGet<{ lockedConversationUrl?: string }>([
     "lockedConversationUrl"
@@ -588,11 +611,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (timerInterval) {
       clearInterval(timerInterval);
     }
-    // Only update elapsed time every second
+    // Only update elapsed time every second (remaining time is updated only when tasks complete)
     timerInterval = window.setInterval(() => {
       const elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
       elapsedTimeElement.textContent = formatTime(elapsedSeconds);
-      updateRemainingTime();
     }, 1000);
   }
 

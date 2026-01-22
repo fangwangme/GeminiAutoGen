@@ -35,6 +35,13 @@ const storageGet = <T,>(keys: string[]): Promise<T> =>
 const normalizePositive = (value: number | undefined, fallback: number) =>
   typeof value === "number" && value > 0 ? value : fallback;
 
+const isImageFilename = (filename: string) =>
+  /\.(png|jpe?g|webp)$/i.test(filename);
+
+const isPreferredGeminiFilename = (filename: string) =>
+  filename.startsWith("Gemini_Generated_Image") ||
+  filename.startsWith("Gemini_Image");
+
 const getDirectoryValues = (
   handle: FileSystemDirectoryHandle
 ): (() => AsyncIterable<FileSystemHandle>) | null =>
@@ -130,15 +137,14 @@ chrome.runtime.onMessage.addListener(
 );
 
 // --- 2. Focus Helpers ---
-async function focusTab(tabId?: number, windowId?: number): Promise<void> {
+// Only activate tab, do NOT focus window (to avoid interrupting user)
+async function focusTab(tabId?: number, _windowId?: number): Promise<void> {
   if (typeof tabId !== "number") return;
   try {
-    if (typeof windowId === "number") {
-      await chrome.windows.update(windowId, { focused: true });
-    }
+    // Only activate the tab, don't focus the window
     await chrome.tabs.update(tabId, { active: true });
   } catch (err) {
-    console.warn("[Background] Failed to focus tab/window:", err);
+    console.warn("[Background] Failed to activate tab:", err);
   }
 }
 
@@ -273,26 +279,37 @@ async function waitForDownloadAndRename(
   // 1. Get initial file list (before download)
   const initialFiles = new Set<string>();
   for await (const entry of sourceValues()) {
-    if (entry.kind === "file" && entry.name.startsWith("Gemini_Generated_Image")) {
+    if (entry.kind === "file" && isImageFilename(entry.name)) {
       initialFiles.add(entry.name);
     }
   }
-  console.log(`[Background] Initial Gemini files in source: ${initialFiles.size}`);
+  console.log(`[Background] Initial image files in source: ${initialFiles.size}`);
 
   // 2. Poll for new file
   const startTime = Date.now();
   const timeout = downloadTimeoutSeconds * 1000; // Convert to ms
   const interval = downloadPollIntervalSeconds * 1000;
+  const allowAnyImageAfterMs = 10000;
+  let allowAnyImageLogged = false;
 
   while (Date.now() - startTime < timeout) {
     await new Promise((r) => setTimeout(r, interval));
 
     let newFile: string | null = null;
+    const elapsedMs = Date.now() - startTime;
+    if (elapsedMs >= allowAnyImageAfterMs && !allowAnyImageLogged) {
+      console.log(
+        "[Background] No Gemini-named download detected yet; widening search to any new image file."
+      );
+      allowAnyImageLogged = true;
+    }
     for await (const entry of sourceValues()) {
       if (
         entry.kind === "file" &&
-        entry.name.startsWith("Gemini_Generated_Image") &&
-        !initialFiles.has(entry.name)
+        isImageFilename(entry.name) &&
+        !initialFiles.has(entry.name) &&
+        (isPreferredGeminiFilename(entry.name) ||
+          elapsedMs >= allowAnyImageAfterMs)
       ) {
         newFile = entry.name;
         break;
