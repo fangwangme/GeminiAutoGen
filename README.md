@@ -12,6 +12,9 @@ A Chrome Extension that automates batch image generation on Google Gemini. Load 
 - **Conversation Lock** - Lock to a specific Gemini chat URL for consistent context
 - **Progress Tracking** - Real-time progress bar with elapsed/remaining time estimates
 - **Auto-Rename** - Automatically renames downloaded files to your specified names
+- **Retry on Failure** - Auto-retry per image with configurable limits
+- **Live Log Window** - Inline log viewer with copy/clear controls
+- **Dark Mode UI** - Side panel follows system light/dark theme
 
 ## 📦 Installation
 
@@ -110,14 +113,20 @@ The extension will:
 | File Detection  | Filesystem polling | More reliable than download listeners |
 | Tab Management  | Destroy & recreate | Ensures clean browser context         |
 
-## ⏱️ Timeouts
+## ⏱️ Timing Defaults
 
-| Operation             | Timeout | Description                                   |
-| --------------------- | ------- | --------------------------------------------- |
-| Image Generation      | 5 min   | Maximum wait for Gemini to generate           |
-| Download Verification | 2 min   | Wait for file to appear in source folder      |
-| Tab Recreation        | 2 sec   | Pause between closing old and opening new tab |
-| Page Initialization   | 1.5 sec | Wait after page load before injecting script  |
+All timing values are configurable in **Settings**.
+
+| Operation             | Default | Description                                       |
+| --------------------- | ------- | ------------------------------------------------- |
+| Image Generation      | 5 min   | Maximum wait for Gemini to generate               |
+| Download Verification | 2 min   | Wait for file to appear in source folder          |
+| Input Field Timeout   | 5 sec   | Wait for prompt input to appear                   |
+| Task Interval         | 5 sec   | Pause between closing old and opening new tab     |
+| Page Stability        | 30 sec  | Wait for page/images to stabilize                 |
+| Page Initialization   | 2 sec   | Extra wait after page load (2 × step delay)       |
+| Poll Interval         | 1 sec   | Base interval for input/send/generation polling   |
+| Step Delay            | 1 sec   | Base delay between UI actions                     |
 
 ## 🐛 Troubleshooting
 
