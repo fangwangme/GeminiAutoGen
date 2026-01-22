@@ -14,3 +14,14 @@ BLOG.md
 
 # Release packages
 *.zip
+
+# Node
+node_modules/
+node_modules
+*.tsbuildinfo
+
+# Lockfiles
+bun.lock
+
+# Local temp repos
+temp_repos/

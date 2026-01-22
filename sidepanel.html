@@ -8,13 +8,21 @@
         body {
             font-family: sans-serif;
             padding: 10px;
-            width: 300px;
+            width: 100%;
+            min-width: 300px;
+            box-sizing: border-box;
+            overflow-x: hidden;
+        }
+
+        * {
+            box-sizing: border-box;
         }
 
         .container {
             display: flex;
             flex-direction: column;
             gap: 10px;
+            width: 100%;
         }
 
         textarea {
@@ -61,6 +69,19 @@
 
         .error {
             color: red;
+        }
+
+        #currentFileName {
+            cursor: pointer;
+            user-select: none;
+        }
+
+        #currentFileName:hover {
+            text-decoration: underline;
+        }
+
+        #currentFileName:active {
+            opacity: 0.7;
         }
     </style>
 </head>

@@ -92,12 +92,13 @@ The extension will:
 
 ```
 ├── manifest.json      # Extension config (Manifest V3)
-├── sidepanel.html/js  # UI and task orchestration
-├── content.js         # Single-task processor (IIFE)
-├── background.js      # File system operations
-├── options.html/js    # Directory configuration
-├── offscreen.html/js  # Offscreen document for file ops
-└── utils/idb.js       # IndexedDB wrapper for handles
+├── sidepanel.html     # Side panel markup
+├── options.html       # Options page markup
+├── src/sidepanel.ts   # UI and task orchestration
+├── src/content.ts     # Single-task processor (IIFE)
+├── src/background.ts  # File system operations
+├── src/options.ts     # Directory configuration
+└── src/utils/idb.ts   # IndexedDB wrapper for handles
 ```
 
 ### Key Design Decisions
