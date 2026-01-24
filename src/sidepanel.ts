@@ -127,6 +127,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   let currentTabId: number | null = null;
   const retryCounts = new Map<number, number>();
   let lastLogTaskIndex: number | null = null;
+  let skippedCount = 0;
+
+  const formatDuration = (ms: number) => {
+    const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${minutes}m ${seconds}s`;
+  };
 
   const clearLogOutput = () => {
     if (logOutput) {
@@ -426,6 +434,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     // Start
     currentIndex = 0;
     retryCounts.clear();
+    skippedCount = 0;
     isRunning = true;
     updateUI(true);
     startTimer();
@@ -437,6 +446,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   stopBtn.addEventListener("click", () => {
     isRunning = false;
     retryCounts.clear();
+    skippedCount = 0;
     stopTimer();
     updateUI(false);
     statusText.textContent = "Stopped by user";
@@ -456,6 +466,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     conversationUrl = "";
     currentTabId = null;
     retryCounts.clear();
+    skippedCount = 0;
 
     // Clear storage
     await storageClear();
@@ -503,6 +514,16 @@ document.addEventListener("DOMContentLoaded", async () => {
       statusText.style.color = "var(--success)";
       progressBar.style.width = "100%";
       currentFileNameEl.textContent = "";
+      const elapsedMs = Date.now() - startTime;
+      const totalTasks = taskQueue.length;
+      const completedCount = Math.max(totalTasks - skippedCount, 0);
+      const averageMs = totalTasks > 0 ? Math.round(elapsedMs / totalTasks) : 0;
+      appendLogLine("--- Summary ---");
+      appendLogLine(`Total tasks: ${totalTasks}`);
+      appendLogLine(`Completed: ${completedCount}`);
+      appendLogLine(`Skipped: ${skippedCount}`);
+      appendLogLine(`Total time: ${formatDuration(elapsedMs)}`);
+      appendLogLine(`Avg per task: ${formatDuration(averageMs)}`);
       return;
     }
 
@@ -591,6 +612,9 @@ document.addEventListener("DOMContentLoaded", async () => {
         })`
       );
       retryCounts.delete(currentIndex);
+      if (request.skipped) {
+        skippedCount += 1;
+      }
       currentIndex++;
 
       // Update remaining time estimate after each task completes
