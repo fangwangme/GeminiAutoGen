@@ -69,6 +69,9 @@ const tabsCreate = (
 ): Promise<chrome.tabs.Tab> =>
   chrome.tabs.create(props) as unknown as Promise<chrome.tabs.Tab>;
 
+const tabsGet = (tabId: number): Promise<chrome.tabs.Tab> =>
+  chrome.tabs.get(tabId) as unknown as Promise<chrome.tabs.Tab>;
+
 const tabsRemove = (tabId: number): Promise<void> =>
   chrome.tabs.remove(tabId) as unknown as Promise<void>;
 
@@ -78,6 +81,19 @@ const executeScript = (
   chrome.scripting.executeScript(
     injection
   ) as unknown as Promise<InjectionResult[]>;
+
+const normalizeUrlForCompare = (url: string) => {
+  try {
+    const parsed = new URL(url);
+    const normalizedPath = parsed.pathname.replace(/\/$/, "");
+    return `${parsed.origin}${normalizedPath}`;
+  } catch {
+    return url.replace(/\/$/, "");
+  }
+};
+
+const urlsMatch = (lockedUrl: string, currentUrl: string) =>
+  normalizeUrlForCompare(lockedUrl) === normalizeUrlForCompare(currentUrl);
 
 document.addEventListener("DOMContentLoaded", async () => {
   // UI Elements
@@ -701,6 +717,16 @@ document.addEventListener("DOMContentLoaded", async () => {
     const tabReadyDelayMs = (normalizedStepDelay || 1) * 2 * 1000;
     await new Promise((r) => setTimeout(r, tabReadyDelayMs));
 
+    if (lockedConversationUrl) {
+      const lockOk = await ensureLockedConversationTab(
+        currentTabId,
+        pageLoadTimeout,
+        normalizedStepDelay,
+        "new tab"
+      );
+      if (!lockOk || !isRunning) return;
+    }
+
     if (!isRunning) return;
 
     // Process next task
@@ -727,6 +753,54 @@ document.addEventListener("DOMContentLoaded", async () => {
         resolve();
       }, timeoutMs);
     });
+  }
+
+  async function ensureLockedConversationTab(
+    tabId: number,
+    pageLoadTimeout: number,
+    normalizedStepDelay: number | undefined,
+    reason: string
+  ) {
+    if (!lockedConversationUrl) return true;
+    try {
+      const tab = await tabsGet(tabId);
+      const currentUrl = tab.url || "";
+      if (currentUrl && urlsMatch(lockedConversationUrl, currentUrl)) {
+        return true;
+      }
+      console.warn(
+        `[Panel] Locked URL mismatch (${reason}). Expected ${lockedConversationUrl}, got ${currentUrl}`
+      );
+      statusText.textContent = "Locked URL mismatch - reopening...";
+      statusText.style.color = "var(--warning)";
+
+      if (currentTabId) {
+        try {
+          await tabsRemove(currentTabId);
+        } catch (err) {
+          console.log("[Panel] Tab already closed:", err);
+        }
+      }
+
+      const freshTab = await tabsCreate({ url: lockedConversationUrl });
+      currentTabId = freshTab.id ?? null;
+
+      if (!currentTabId) {
+        statusText.textContent = "Error: Could not create Gemini tab";
+        statusText.style.color = "var(--danger)";
+        isRunning = false;
+        updateUI(false);
+        return false;
+      }
+
+      await waitForPageLoad(currentTabId, pageLoadTimeout);
+      const tabReadyDelayMs = (normalizedStepDelay || 1) * 2 * 1000;
+      await new Promise((r) => setTimeout(r, tabReadyDelayMs));
+      return true;
+    } catch (err) {
+      console.warn("[Panel] Failed to validate locked URL:", err);
+      return true;
+    }
   }
 
   // UI Helpers

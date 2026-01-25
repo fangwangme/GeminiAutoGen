@@ -80,7 +80,7 @@ const saveStatus = document.getElementById("saveStatus") as HTMLDivElement;
 
 // Default Values (seconds)
 const DEFAULTS = {
-  settings_generationTimeout: 300,
+  settings_generationTimeout: 120,
   settings_downloadTimeout: 120,
   settings_pageLoadTimeout: 30,
   settings_inputTimeout: 5,

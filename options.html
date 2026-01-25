@@ -4,17 +4,60 @@
 <head>
     <title>Gemini AutoGen Settings</title>
     <style>
+        :root {
+            --bg: #ffffff;
+            --text: #1f1f1f;
+            --muted: #666666;
+            --panel-bg: #ffffff;
+            --panel-border: #cccccc;
+            --button-bg: #1a73e8;
+            --button-hover: #1557b0;
+            --button-disabled: #cccccc;
+            --info-bg: #e8f0fe;
+            --section-border: #eeeeee;
+            --input-bg: #ffffff;
+            --input-border: #cccccc;
+            --subtle-bg: #f1f3f4;
+            --subtle-border: #dadce0;
+            --status-success: #1b5e20;
+            --status-error: #c62828;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #121416;
+                --text: #e6e6e6;
+                --muted: #a0a0a0;
+                --panel-bg: #1a1d20;
+                --panel-border: #2a2f35;
+                --button-bg: #6aa5ff;
+                --button-hover: #4d89e6;
+                --button-disabled: #3a3f46;
+                --info-bg: #1c2636;
+                --section-border: #2a2f35;
+                --input-bg: #111315;
+                --input-border: #2a2f35;
+                --subtle-bg: #23272b;
+                --subtle-border: #363b42;
+                --status-success: #58d68d;
+                --status-error: #ff6b6b;
+            }
+        }
+
         body {
             font-family: system-ui, sans-serif;
             padding: 20px;
             max-width: 600px;
             margin: 0 auto;
+            background: var(--bg);
+            color: var(--text);
         }
 
         .container {
-            border: 1px solid #ccc;
+            border: 1px solid var(--panel-border);
             padding: 20px;
             border-radius: 8px;
+            background: var(--panel-bg);
         }
 
         h1 {
@@ -23,12 +66,12 @@
         }
 
         p {
-            color: #666;
+            color: var(--muted);
             line-height: 1.5;
         }
 
         button {
-            background: #1a73e8;
+            background: var(--button-bg);
             color: white;
             border: none;
             padding: 10px 20px;
@@ -38,11 +81,11 @@
         }
 
         button:hover {
-            background: #1557b0;
+            background: var(--button-hover);
         }
 
         button:disabled {
-            background: #ccc;
+            background: var(--button-disabled);
             cursor: not-allowed;
         }
 
@@ -52,15 +95,15 @@
         }
 
         .success {
-            color: green;
+            color: var(--status-success);
         }
 
         .error {
-            color: red;
+            color: var(--status-error);
         }
 
         .info-box {
-            background: #e8f0fe;
+            background: var(--info-bg);
             padding: 15px;
             border-radius: 4px;
             margin-bottom: 20px;
@@ -68,7 +111,7 @@
 
         .section {
             margin-top: 20px;
-            border-top: 1px solid #eee;
+            border-top: 1px solid var(--section-border);
             padding-top: 16px;
         }
         
@@ -86,15 +129,17 @@
             display: block;
             margin-top: 6px;
             padding: 6px 8px;
-            border: 1px solid #ccc;
+            border: 1px solid var(--input-border);
             border-radius: 4px;
             width: 120px;
+            background: var(--input-bg);
+            color: var(--text);
         }
         
         .help-text {
             display: inline;
             font-size: 12px;
-            color: #666;
+            color: var(--muted);
             margin-left: 8px;
             margin-bottom: 0;
         }
@@ -116,26 +161,26 @@
             <div style="margin-bottom: 20px;">
                 <label style="display:block; margin-bottom:5px; font-weight:bold;">Source Folder (Where Chrome saves
                     files)</label>
-                <div style="font-size:12px; color:#666; margin-bottom:5px;">Select the folder where Chrome downloads
+                <div style="font-size:12px; color: var(--muted); margin-bottom:5px;">Select the folder where Chrome downloads
                     images (e.g., Downloads/Chrome).</div>
                 <div style="display: flex; align-items: center; gap: 10px;">
                     <button id="selectSourceBtn"
-                        style="background: #f1f3f4; color: #333; border: 1px solid #dadce0;">Select Source
+                        style="background: var(--subtle-bg); color: var(--text); border: 1px solid var(--subtle-border);">Select Source
                         Folder</button>
-                    <span id="sourceStatus" style="font-size: 13px; color: #666;">Not Selected</span>
+                    <span id="sourceStatus" style="font-size: 13px; color: var(--muted);">Not Selected</span>
                 </div>
             </div>
 
             <div style="margin-bottom: 20px;">
                 <label style="display:block; margin-bottom:5px; font-weight:bold;">Output Folder (Where we move files
                     to)</label>
-                <div style="font-size:12px; color:#666; margin-bottom:5px;">Select the folder to save renamed images
+                <div style="font-size:12px; color: var(--muted); margin-bottom:5px;">Select the folder to save renamed images
                     (e.g., Downloads/GeminiAutoGen).</div>
                 <div style="display: flex; align-items: center; gap: 10px;">
                     <button id="selectOutputBtn"
-                        style="background: #f1f3f4; color: #333; border: 1px solid #dadce0;">Select Output
+                        style="background: var(--subtle-bg); color: var(--text); border: 1px solid var(--subtle-border);">Select Output
                         Folder</button>
-                    <span id="outputStatus" style="font-size: 13px; color: #666;">Not Selected</span>
+                    <span id="outputStatus" style="font-size: 13px; color: var(--muted);">Not Selected</span>
                 </div>
             </div>
         </div>
@@ -145,8 +190,8 @@
             
             <div class="form-group">
                 <label for="generationTimeout">Image Generation Timeout (seconds)</label>
-                <div class="help-text">Max wait time for image generation (Default: 300).</div>
-                <input type="number" id="generationTimeout" min="30" value="300">
+                <div class="help-text">Max wait time for image generation (Default: 120).</div>
+                <input type="number" id="generationTimeout" min="30" value="120">
             </div>
 
             <div class="form-group">
