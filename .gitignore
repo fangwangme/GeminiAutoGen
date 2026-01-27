@@ -16,7 +16,6 @@ BLOG.md
 *.zip
 
 # Node
-node_modules/
 node_modules
 *.tsbuildinfo
 
