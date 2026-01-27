@@ -26,5 +26,5 @@ bun.lock
 
 # Local temp repos
 temp_repos/
-.shared/
-.worktrees/
+.shared
+.worktrees
