@@ -4,7 +4,7 @@
 You are an expert developer agent. Act precisely and maintain code quality.
 
 ## Core Rules
-- **Workspace**: Main repo (`GeminiAutoGen/`) is the primary workspace. Dev worktree is at `.worktrees/dev/`.
+- **Workspace**: Main repo (`GeminiAutoGen/`) is the primary workspace. Dev worktree is at `.worktrees/GeminiAutoGen-dev/`.
 - **Git**: This is a **Standard Repo + Worktree** setup. Main repo is a working directory, not a bare repo.
 - **Tools**: Always use **absolute paths** for file tools.
 - **Dependencies**: Use `.shared/` resources (node_modules). Do not reinstall.
@@ -22,8 +22,8 @@ GeminiAutoGen/                      # Main repo (active workspace)
 │   ├── releases/
 │   ├── package.json
 │   └── package-lock.json
-├── .worktrees/dev/                 # Dev worktree
-│   ├── .git → ../.git/worktrees/dev  # Worktree git config
+├── .worktrees/GeminiAutoGen-dev/     # Dev worktree
+│   ├── .git → ../.git/worktrees/GeminiAutoGen-dev  # Worktree git config
 │   ├── .shared → ../../.shared     # Symlink to shared resources
 │   ├── node_modules → ../../.shared/node_modules
 │   └── [project files mirror main]
