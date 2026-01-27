@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const outDir = path.resolve(rootDir, "../.shared/extension-dist");
+const outDir = path.resolve(rootDir, ".shared/extension-dist");
 
 const entries = [
   { src: "manifest.json", dest: "manifest.json" },

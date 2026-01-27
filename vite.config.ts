@@ -9,7 +9,7 @@ export default defineConfig({
   publicDir: false,
   build: {
     target: "es2020",
-    outDir: path.resolve(rootDir, "../.shared/extension-dist"),
+    outDir: path.resolve(rootDir, ".shared/extension-dist"),
     emptyOutDir: false,
     rollupOptions: {
       input: {

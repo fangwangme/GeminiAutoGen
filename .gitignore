@@ -21,7 +21,10 @@ node_modules
 *.tsbuildinfo
 
 # Lockfiles
+package-lock.json
 bun.lock
 
 # Local temp repos
 temp_repos/
+.shared/
+.worktrees/
