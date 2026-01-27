@@ -42,7 +42,7 @@ GeminiAutoGen/                      # Main repo (active workspace)
 
 ### Build Paths
 - **vite.config.ts**: Output to `.shared/extension-dist`
-- **scripts/copy-static.mjs`: Copies to `.shared/extension-dist`
+- **scripts/copy-static.mjs**: Copies to `.shared/extension-dist`
 - Both branches build to the same location
 
 ### Git Workflow
