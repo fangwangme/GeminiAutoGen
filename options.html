@@ -231,6 +231,12 @@
             </div>
 
             <div class="form-group">
+                <label for="maxConsecutiveFailures">Max Consecutive Failures</label>
+                <div class="help-text">Stop after this many consecutive failed tasks (Default: 5).</div>
+                <input type="number" id="maxConsecutiveFailures" min="0" step="1" value="5">
+            </div>
+
+            <div class="form-group">
                 <label for="pollInterval">Poll Interval (seconds)</label>
                 <div class="help-text">Used for input/send/generation/download checks (Default: 1).</div>
                 <input type="number" id="pollInterval" min="0.1" step="0.1" value="1">

@@ -27,10 +27,13 @@ type BackgroundRequest =
       source?: string;
     };
 
+type FileErrorType = "folder" | "download" | "generation";
+
 type WaitAndRenameResult = {
   success: boolean;
   filename?: string;
   error?: string;
+  errorType?: FileErrorType;
 };
 
 type DownloadSettings = {
@@ -45,6 +48,23 @@ const storageGet = <T,>(keys: string[]): Promise<T> =>
 
 const normalizePositive = (value: number | undefined, fallback: number) =>
   typeof value === "number" && value > 0 ? value : fallback;
+
+const toErrorMessage = (err: unknown) =>
+  err instanceof Error ? err.message : String(err);
+
+const isFolderAuthErrorMessage = (message: string) => {
+  const normalized = message.toLowerCase();
+  return [
+    "missing directory handles",
+    "permission lost",
+    "directory iteration is not supported",
+    "notallowederror",
+    "securityerror",
+    "permission",
+    "not authorized",
+    "denied"
+  ].some((fragment) => normalized.includes(fragment));
+};
 
 const isImageFilename = (filename: string) =>
   /\.(png|jpe?g|webp)$/i.test(filename);
@@ -108,9 +128,12 @@ chrome.runtime.onMessage.addListener(
       checkFileExistsFS(request.filename)
         .then((exists) => sendResponse({ exists }))
         .catch((err) => {
-          const message = err instanceof Error ? err.message : String(err);
+          const message = toErrorMessage(err);
           console.error("FS Check Error:", err);
-          sendResponse({ exists: false, error: message });
+          const errorType: FileErrorType = isFolderAuthErrorMessage(message)
+            ? "folder"
+            : "download";
+          sendResponse({ exists: false, error: message, errorType });
         });
       return true;
     }
@@ -123,8 +146,11 @@ chrome.runtime.onMessage.addListener(
       })
         .then((result) => sendResponse(result))
         .catch((err) => {
-          const message = err instanceof Error ? err.message : String(err);
-          sendResponse({ success: false, error: message });
+          const message = toErrorMessage(err);
+          const errorType: FileErrorType = isFolderAuthErrorMessage(message)
+            ? "folder"
+            : "download";
+          sendResponse({ success: false, error: message, errorType });
         });
       return true;
     }
@@ -188,7 +214,9 @@ async function getOutputHandle(): Promise<FileSystemDirectoryHandle | null> {
 
 async function checkFileExistsFS(filename: string): Promise<boolean> {
   const outputHandle = await getOutputHandle();
-  if (!outputHandle) return false;
+  if (!outputHandle) {
+    throw new Error("Missing directory handles. Please configure in Options.");
+  }
 
   try {
     await outputHandle.getFileHandle(filename);
@@ -255,7 +283,8 @@ async function waitForDownloadAndRename(
   if (!sourceHandle || !outputHandle) {
     return {
       success: false,
-      error: "Missing directory handles. Please configure in Options."
+      error: "Missing directory handles. Please configure in Options.",
+      errorType: "folder"
     };
   }
 
@@ -263,7 +292,8 @@ async function waitForDownloadAndRename(
   if (!sourceValues) {
     return {
       success: false,
-      error: "Directory iteration is not supported in this browser."
+      error: "Directory iteration is not supported in this browser.",
+      errorType: "folder"
     };
   }
 
@@ -383,7 +413,8 @@ async function waitForDownloadAndRename(
           return {
             success: false,
             error:
-              "Image is square (1:1). Generation failed (expected 16:9). Workflow stopped."
+              "Image is square (1:1). Generation failed (expected 16:9). Workflow stopped.",
+            errorType: "generation"
           };
         }
 
@@ -422,7 +453,8 @@ async function waitForDownloadAndRename(
           await sourceHandle.removeEntry(newFile);
           return {
             success: false,
-            error: "Duplicate image detected - workflow terminated"
+            error: "Duplicate image detected - workflow terminated",
+            errorType: "generation"
           };
         }
 
@@ -443,14 +475,21 @@ async function waitForDownloadAndRename(
         console.log(`[Background] Success! Moved: ${newFile} -> ${targetFilename}`);
         return { success: true, filename: targetFilename };
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = toErrorMessage(err);
+        const errorType: FileErrorType = isFolderAuthErrorMessage(message)
+          ? "folder"
+          : "download";
         console.error("[Background] Rename failed:", err);
-        return { success: false, error: message };
+        return { success: false, error: message, errorType };
       }
     }
   }
 
-  return { success: false, error: "Timeout waiting for download" };
+  return {
+    success: false,
+    error: "Timeout waiting for download",
+    errorType: "download"
+  };
 }
 
 // --- 4. Side Panel Behavior ---

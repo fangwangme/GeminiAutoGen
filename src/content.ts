@@ -1,5 +1,8 @@
 import type { TaskItem } from "./types.js";
 
+type TaskErrorType = "generation" | "download" | "folder" | "locked-url";
+type TaskMode = "full" | "download-only";
+
 type ContentSettings = {
   settings_generationTimeout?: number;
   settings_pageLoadTimeout?: number;
@@ -14,19 +17,21 @@ type ContentSettings = {
 type CheckFileExistsResponse = {
   exists: boolean;
   error?: string;
+  errorType?: TaskErrorType;
 };
 
 type WaitAndRenameResponse = {
   success: boolean;
   filename?: string;
   error?: string;
+  errorType?: TaskErrorType;
 };
 
 type ContentMessage =
   | { action: "CHECK_FILE_EXISTS"; filename: string }
   | { action: "WAIT_AND_RENAME"; targetFilename: string }
   | { action: "TASK_COMPLETE"; skipped: boolean }
-  | { action: "TASK_ERROR"; error: string }
+  | { action: "TASK_ERROR"; error: string; errorType?: TaskErrorType }
   | { action: "UPDATE_STATUS"; status: string; isError?: boolean }
   | {
       action: "LOG";
@@ -44,6 +49,74 @@ const runtimeSendMessage = <T,>(message: ContentMessage): Promise<T> =>
 
 const toErrorMessage = (err: unknown): string =>
   err instanceof Error ? err.message : String(err);
+
+const normalizeTaskMode = (mode?: string): TaskMode =>
+  mode === "download-only" ? "download-only" : "full";
+
+const normalizeUrlForCompare = (url: string) => {
+  try {
+    const parsed = new URL(url);
+    const normalizedPath = parsed.pathname.replace(/\/$/, "");
+    return `${parsed.origin}${normalizedPath}`;
+  } catch {
+    return url.replace(/\/$/, "");
+  }
+};
+
+const urlsMatch = (lockedUrl: string, currentUrl: string) =>
+  normalizeUrlForCompare(lockedUrl) === normalizeUrlForCompare(currentUrl);
+
+const isGeminiHost = (hostname: string) =>
+  hostname === "gemini.google.com" || hostname.endsWith(".gemini.google.com");
+
+const validateLockedConversationUrl = (url: string) => {
+  try {
+    const parsed = new URL(url);
+    if (!isGeminiHost(parsed.hostname)) {
+      return { ok: false, message: "Locked URL must be a Gemini URL" } as const;
+    }
+    const normalizedPath = parsed.pathname.replace(/\/$/, "");
+    const pathWithoutAccount = normalizedPath.replace(/^\/u\/\d+/, "");
+    if (pathWithoutAccount === "/app") {
+      return {
+        ok: false,
+        message: "Locked URL is a new conversation URL (use a specific chat URL)"
+      } as const;
+    }
+    if (!pathWithoutAccount.includes("/app/")) {
+      return {
+        ok: false,
+        message: "Locked URL must be a Gemini conversation URL"
+      } as const;
+    }
+    return { ok: true } as const;
+  } catch {
+    return { ok: false, message: "Locked URL is invalid" } as const;
+  }
+};
+
+const isFolderAuthErrorMessage = (message: string) => {
+  const normalized = message.toLowerCase();
+  return [
+    "missing directory handles",
+    "permission lost",
+    "directory iteration is not supported",
+    "notallowederror",
+    "securityerror",
+    "permission",
+    "not authorized",
+    "denied"
+  ].some((fragment) => normalized.includes(fragment));
+};
+
+class TaskError extends Error {
+  errorType: TaskErrorType;
+
+  constructor(message: string, errorType: TaskErrorType) {
+    super(message);
+    this.errorType = errorType;
+  }
+}
 
 const logToBackground = (
   level: "log" | "warn" | "error",
@@ -735,11 +808,199 @@ const logError = (message: string, data?: unknown) =>
     await wait(CONFIG_STEP_DELAY);
   }
 
+  async function prepareDownloadOnlyContext(
+    task: TaskItem,
+    filename: string,
+    composedPrompt: string,
+    promptAnchorText: string
+  ) {
+    logInfo("[Content] Download-only mode: locating existing response", {
+      filename
+    });
+    updateStatus("Retrying download...");
+
+    let responseContainer: Element | null = null;
+
+    const conversationMatch = findConversationByPrompt(task.prompt, filename);
+    if (conversationMatch?.container) {
+      responseContainer = conversationMatch.container;
+    }
+
+    if (!responseContainer) {
+      const anchor =
+        findUserQueryByPromptText(promptAnchorText) ||
+        findUserQueryByPromptText(composedPrompt) ||
+        findPromptAnchor(promptAnchorText);
+      responseContainer = anchor
+        ? getResponseContainerForAnchor(anchor) ?? getConversationContainer(anchor)
+        : null;
+    }
+
+    if (!responseContainer) {
+      throw new TaskError(
+        "Existing response not found for download-only retry",
+        "generation"
+      );
+    }
+
+    let pollTick = 0;
+    await waitFor(
+      () => {
+        pollTick += 1;
+        if (!responseContainer || !responseContainer.isConnected) return false;
+        const responseState = getResponseReadyState(responseContainer);
+        if (!responseState.ready) {
+          if (pollTick % 5 === 0) {
+            logInfo("[Content] Waiting for response ready (download-only)", responseState);
+          }
+          return false;
+        }
+        const buttons = getDownloadButtonsInContainer(responseContainer, true);
+        const loadedImages = getLoadedImagesInContainer(responseContainer);
+        if (pollTick % 5 === 0) {
+          logInfo("[Content] Download-only scan", {
+            buttons: buttons.length,
+            loadedImages: loadedImages.length,
+            responseClass: responseContainer.className || "(none)"
+          });
+        }
+        return buttons.length > 0 && loadedImages.length > 0;
+      },
+      CONFIG_GEN_TIMEOUT,
+      CONFIG_POLL,
+      "Timeout waiting for existing response"
+    );
+
+    const latestDownloadButtons = getDownloadButtonsInContainer(responseContainer, true);
+    const latestNewImages = getLoadedImagesInContainer(responseContainer);
+
+    return { responseContainer, latestDownloadButtons, latestNewImages };
+  }
+
+  async function performDownload(params: {
+    filename: string;
+    responseContainer: Element | null;
+    latestDownloadButtons: HTMLButtonElement[];
+    latestNewImages: HTMLImageElement[];
+  }) {
+    const { filename, responseContainer, latestDownloadButtons, latestNewImages } =
+      params;
+    updateStatus("Downloading...");
+
+    let targetBtn: HTMLButtonElement | null = null;
+
+    if (responseContainer) {
+      targetBtn = getDownloadButtonInConversation(responseContainer);
+      if (targetBtn) {
+        logInfo("[Content] Found download button via getDownloadButtonInConversation", {
+          button: describeButton(targetBtn)
+        });
+      }
+    }
+
+    if (!targetBtn) {
+      let downloadBtns = latestDownloadButtons.length
+        ? latestDownloadButtons
+        : responseContainer
+          ? getDownloadButtonsInContainer(responseContainer, true)
+          : [];
+      logInfo("[Content] Download buttons in response", {
+        count: downloadBtns.length,
+        buttons: downloadBtns.map(describeButton)
+      });
+      if (!downloadBtns.length) {
+        const fallbackButtons = responseContainer
+          ? getDownloadButtonsInContainer(responseContainer, true)
+          : [];
+        logInfo("[Content] Download buttons including hidden", {
+          count: fallbackButtons.length,
+          buttons: fallbackButtons.map(describeButton)
+        });
+        downloadBtns = fallbackButtons;
+      }
+      if (!downloadBtns.length) {
+        logInfo("[Content] All download buttons on page", {
+          count: getDownloadBtns(true).length,
+          buttons: getDownloadBtns(true).map(describeButton)
+        });
+      }
+
+      const nearestButton = getDownloadButtonForImage(
+        latestNewImages.length
+          ? latestNewImages[latestNewImages.length - 1]
+          : responseContainer
+            ? getGeneratedImages(responseContainer).slice(-1)[0] || null
+            : null
+      );
+      if (nearestButton && !downloadBtns.includes(nearestButton)) {
+        downloadBtns.push(nearestButton);
+      }
+
+      if (!downloadBtns.length) {
+        throw new TaskError("No download buttons found after generation", "generation");
+      }
+      const lastBtn = downloadBtns[downloadBtns.length - 1];
+      targetBtn = nearestButton || lastBtn;
+    }
+
+    if (!targetBtn) {
+      throw new TaskError("No download button found after generation", "generation");
+    }
+
+    logInfo("[Content] Clicking download", {
+      filename,
+      button: describeButton(targetBtn)
+    });
+
+    for (let revealAttempt = 0; revealAttempt < 3; revealAttempt++) {
+      revealDownloadButton(targetBtn);
+      await wait(200);
+      if (isClickable(targetBtn)) {
+        break;
+      }
+      logInfo(
+        `[Content] Download button not clickable yet, attempt ${revealAttempt + 1}`
+      );
+    }
+
+    if (!isClickable(targetBtn)) {
+      logWarn(
+        "[Content] Download button still not clickable after multiple reveals, trying anyway"
+      );
+    }
+
+    clickDownloadButton(targetBtn);
+    await clickDownloadMenuItem();
+
+    updateStatus("Waiting for file...");
+    const renameResult = await runtimeSendMessage<WaitAndRenameResponse>({
+      action: "WAIT_AND_RENAME",
+      targetFilename: filename
+    });
+
+    if (!renameResult || !renameResult.success) {
+      const fallbackType: TaskErrorType = renameResult?.errorType
+        ? renameResult.errorType
+        : renameResult?.error && isFolderAuthErrorMessage(renameResult.error)
+          ? "folder"
+          : "download";
+      throw new TaskError(renameResult?.error || "File rename failed", fallbackType);
+    }
+  }
+
+  let currentPhase: "generation" | "download" = "generation";
+
   // --- Main Logic ---
   try {
     // 1. Get current task from storage
-    const data = await storageGet<{ currentTask?: TaskItem }>(["currentTask"]);
+    const data = await storageGet<{
+      currentTask?: TaskItem;
+      currentTaskMode?: string;
+      lockedConversationUrl?: string;
+    }>(["currentTask", "currentTaskMode", "lockedConversationUrl"]);
     const task = data.currentTask;
+    const taskMode = normalizeTaskMode(data.currentTaskMode);
+    const lockedConversationUrl = (data.lockedConversationUrl || "").trim();
 
     if (!task) {
       logInfo("[Content] No task found.");
@@ -771,10 +1032,57 @@ const logError = (message: string, data?: unknown) =>
       filename
     });
 
+    if (checkResult?.error) {
+      const errorType: TaskErrorType = checkResult.errorType
+        ? checkResult.errorType
+        : isFolderAuthErrorMessage(checkResult.error)
+          ? "folder"
+          : "download";
+      throw new TaskError(checkResult.error, errorType);
+    }
+
     if (checkResult && checkResult.exists) {
       logInfo(`[Content] File exists, skipping: ${filename}`);
       updateStatus(`Skipped: ${task.name}`);
       runtimeSendMessage<void>({ action: "TASK_COMPLETE", skipped: true });
+      return;
+    }
+
+    if (!lockedConversationUrl) {
+      throw new TaskError(
+        "Locked conversation URL is required. Please lock a Gemini chat URL.",
+        "locked-url"
+      );
+    }
+    const lockedValidation = validateLockedConversationUrl(lockedConversationUrl);
+    if (!lockedValidation.ok) {
+      throw new TaskError(lockedValidation.message, "locked-url");
+    }
+    const currentUrl = window.location.href;
+    if (!urlsMatch(lockedConversationUrl, currentUrl)) {
+      throw new TaskError(
+        `Locked URL mismatch. Expected ${lockedConversationUrl}, got ${currentUrl}`,
+        "locked-url"
+      );
+    }
+
+    if (taskMode === "download-only") {
+      const downloadContext = await prepareDownloadOnlyContext(
+        task,
+        filename,
+        composedPrompt,
+        promptAnchorText
+      );
+      currentPhase = "download";
+      await performDownload({
+        filename,
+        responseContainer: downloadContext.responseContainer,
+        latestDownloadButtons: downloadContext.latestDownloadButtons,
+        latestNewImages: downloadContext.latestNewImages
+      });
+      logInfo(`[Content] Task complete: ${task.name}`);
+      updateStatus(`Complete: ${task.name}`);
+      runtimeSendMessage<void>({ action: "TASK_COMPLETE", skipped: false });
       return;
     }
 
@@ -1316,111 +1624,33 @@ const logError = (message: string, data?: unknown) =>
     await wait(CONFIG_STEP_DELAY * 2); // Stability wait
 
     // 8. Download
-    updateStatus("Downloading...");
-    
-    // First try to get download button directly from conversation container
-    let targetBtn: HTMLButtonElement | null = null;
-    
-    // Try the new direct method first
-    if (responseContainer) {
-      targetBtn = getDownloadButtonInConversation(responseContainer);
-      if (targetBtn) {
-        logInfo("[Content] Found download button via getDownloadButtonInConversation", {
-          button: describeButton(targetBtn)
-        });
-      }
-    }
-    
-    // Fallback to previous methods
-    if (!targetBtn) {
-      let downloadBtns = latestDownloadButtons.length
-        ? latestDownloadButtons
-        : responseContainer
-          ? getDownloadButtonsInContainer(responseContainer, true)
-          : [];
-      logInfo("[Content] Download buttons in response", {
-        count: downloadBtns.length,
-        buttons: downloadBtns.map(describeButton)
-      });
-      if (!downloadBtns.length) {
-        const fallbackButtons = responseContainer
-          ? getDownloadButtonsInContainer(responseContainer, true)
-          : [];
-        logInfo("[Content] Download buttons including hidden", {
-          count: fallbackButtons.length,
-          buttons: fallbackButtons.map(describeButton)
-        });
-        downloadBtns = fallbackButtons;
-      }
-      if (!downloadBtns.length) {
-        logInfo("[Content] All download buttons on page", {
-          count: getDownloadBtns(true).length,
-          buttons: getDownloadBtns(true).map(describeButton)
-        });
-      }
-
-      const nearestButton = getDownloadButtonForImage(
-        latestNewImages.length
-          ? latestNewImages[latestNewImages.length - 1]
-          : responseContainer
-            ? getGeneratedImages(responseContainer).slice(-1)[0] || null
-            : null
-      );
-      if (nearestButton && !downloadBtns.includes(nearestButton)) {
-        downloadBtns.push(nearestButton);
-      }
-
-      if (!downloadBtns.length) {
-        throw new Error("No download buttons found after generation");
-      }
-      const lastBtn = downloadBtns[downloadBtns.length - 1];
-      targetBtn = nearestButton || lastBtn;
-    }
-    
-    if (!targetBtn) {
-      throw new Error("No download button found after generation");
-    }
-
-    logInfo("[Content] Clicking download", {
+    currentPhase = "download";
+    await performDownload({
       filename,
-      button: describeButton(targetBtn)
+      responseContainer,
+      latestDownloadButtons,
+      latestNewImages
     });
-    
-    // More aggressive reveal: try multiple times with longer waits
-    for (let revealAttempt = 0; revealAttempt < 3; revealAttempt++) {
-      revealDownloadButton(targetBtn);
-      await wait(200);
-      if (isClickable(targetBtn)) {
-        break;
-      }
-      logInfo(`[Content] Download button not clickable yet, attempt ${revealAttempt + 1}`);
-    }
-    
-    if (!isClickable(targetBtn)) {
-      logWarn("[Content] Download button still not clickable after multiple reveals, trying anyway");
-    }
-    
-    clickDownloadButton(targetBtn);
-    await clickDownloadMenuItem();
-
-    // 9. Wait for download and rename (handled by background.ts)
-    updateStatus("Waiting for file...");
-    const renameResult = await runtimeSendMessage<WaitAndRenameResponse>({
-      action: "WAIT_AND_RENAME",
-      targetFilename: filename
-    });
-
-    if (!renameResult || !renameResult.success) {
-      throw new Error(renameResult?.error || "File rename failed");
-    }
 
     logInfo(`[Content] Task complete: ${task.name}`);
     updateStatus(`Complete: ${task.name}`);
     runtimeSendMessage<void>({ action: "TASK_COMPLETE", skipped: false });
   } catch (err) {
     const message = toErrorMessage(err);
-    logError("[Content] Error", { message });
+    const errorType: TaskErrorType =
+      err instanceof TaskError
+        ? err.errorType
+        : isFolderAuthErrorMessage(message)
+          ? "folder"
+          : currentPhase === "download"
+            ? "download"
+            : "generation";
+    logError("[Content] Error", { message, errorType });
     updateStatus(`Error: ${message}`, true);
-    runtimeSendMessage<void>({ action: "TASK_ERROR", error: message });
+    runtimeSendMessage<void>({
+      action: "TASK_ERROR",
+      error: message,
+      errorType
+    });
   }
 })();
