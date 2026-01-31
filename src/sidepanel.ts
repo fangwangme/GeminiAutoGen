@@ -14,7 +14,7 @@ attachConsoleTimestamps();
 
 type PanelMessage =
   | { action: "TASK_COMPLETE"; skipped?: boolean }
-  | { action: "TASK_ERROR"; error: string }
+  | { action: "TASK_ERROR"; error: string; errorType?: TaskErrorType }
   | { action: "UPDATE_STATUS"; status: string; isError?: boolean }
   | {
       action: "PANEL_LOG";
@@ -24,6 +24,9 @@ type PanelMessage =
       source?: string;
       timestamp: string;
     };
+
+type TaskErrorType = "generation" | "download" | "folder" | "locked-url";
+type TaskRunMode = "full" | "download-only";
 
 type PanelBackgroundMessage =
   | { action: "OPEN_OPTIONS" }
@@ -95,6 +98,53 @@ const normalizeUrlForCompare = (url: string) => {
 const urlsMatch = (lockedUrl: string, currentUrl: string) =>
   normalizeUrlForCompare(lockedUrl) === normalizeUrlForCompare(currentUrl);
 
+const isGeminiHost = (hostname: string) =>
+  hostname === "gemini.google.com" || hostname.endsWith(".gemini.google.com");
+
+const validateLockedConversationUrl = (url: string) => {
+  try {
+    const parsed = new URL(url);
+    if (!isGeminiHost(parsed.hostname)) {
+      return { ok: false, message: "Must be a Gemini URL" } as const;
+    }
+    const normalizedPath = parsed.pathname.replace(/\/$/, "");
+    const pathWithoutAccount = normalizedPath.replace(/^\/u\/\d+/, "");
+    if (pathWithoutAccount === "/app") {
+      return {
+        ok: false,
+        message: "Must be a specific conversation URL (not /app)"
+      } as const;
+    }
+    if (!pathWithoutAccount.includes("/app/")) {
+      return { ok: false, message: "Must be a Gemini conversation URL" } as const;
+    }
+    return { ok: true } as const;
+  } catch {
+    return { ok: false, message: "Invalid URL" } as const;
+  }
+};
+
+const isFolderAuthErrorMessage = (message: string) => {
+  const normalized = message.toLowerCase();
+  return [
+    "missing directory handles",
+    "permission lost",
+    "directory iteration is not supported",
+    "notallowederror",
+    "securityerror",
+    "permission",
+    "not authorized",
+    "denied"
+  ].some((fragment) => normalized.includes(fragment));
+};
+
+const isDownloadErrorMessage = (message: string) => {
+  const normalized = message.toLowerCase();
+  return ["download", "rename", "waiting for file", "timeout waiting for download"].some(
+    (fragment) => normalized.includes(fragment)
+  );
+};
+
 document.addEventListener("DOMContentLoaded", async () => {
   // UI Elements
   const jsonFileInput = document.getElementById("jsonFile") as HTMLInputElement;
@@ -144,6 +194,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   const retryCounts = new Map<number, number>();
   let lastLogTaskIndex: number | null = null;
   let skippedCount = 0;
+  let failedCount = 0;
+  let consecutiveFailureCount = 0;
+  let nextTaskMode: TaskRunMode = "full";
 
   const formatDuration = (ms: number) => {
     const totalSeconds = Math.max(0, Math.floor(ms / 1000));
@@ -238,10 +291,18 @@ document.addEventListener("DOMContentLoaded", async () => {
     "lockedConversationUrl"
   ]);
   if (urlData.lockedConversationUrl) {
-    lockedConversationUrl = urlData.lockedConversationUrl;
-    conversationUrlInput.value = lockedConversationUrl;
-    urlStatus.textContent = "✅ URL locked - will use this conversation";
-    urlStatus.style.color = "var(--success)";
+    const candidate = urlData.lockedConversationUrl.trim();
+    const validation = validateLockedConversationUrl(candidate);
+    conversationUrlInput.value = candidate;
+    if (validation.ok) {
+      lockedConversationUrl = candidate;
+      urlStatus.textContent = "✅ URL locked - will use this conversation";
+      urlStatus.style.color = "var(--success)";
+    } else {
+      lockedConversationUrl = "";
+      urlStatus.textContent = `❌ ${validation.message}`;
+      urlStatus.style.color = "var(--danger)";
+    }
   }
 
   // Load saved tasks
@@ -262,8 +323,9 @@ document.addEventListener("DOMContentLoaded", async () => {
         urlStatus.style.color = "var(--danger)";
         return;
       }
-      if (!url.includes("gemini.google.com")) {
-        urlStatus.textContent = "❌ Must be a Gemini URL";
+      const validation = validateLockedConversationUrl(url);
+      if (!validation.ok) {
+        urlStatus.textContent = `❌ ${validation.message}`;
         urlStatus.style.color = "var(--danger)";
         return;
       }
@@ -343,7 +405,19 @@ document.addEventListener("DOMContentLoaded", async () => {
     const storedUrl = await storageGet<{ lockedConversationUrl?: string }>([
       "lockedConversationUrl"
     ]);
-    lockedConversationUrl = storedUrl.lockedConversationUrl || "";
+    const lockedCandidate = storedUrl.lockedConversationUrl?.trim() || "";
+    if (!lockedCandidate) {
+      statusText.textContent = "Please lock a conversation URL first";
+      statusText.style.color = "var(--danger)";
+      return;
+    }
+    const lockedValidation = validateLockedConversationUrl(lockedCandidate);
+    if (!lockedValidation.ok) {
+      statusText.textContent = `Locked URL invalid: ${lockedValidation.message}`;
+      statusText.style.color = "var(--danger)";
+      return;
+    }
+    lockedConversationUrl = lockedCandidate;
 
     if (loadedTasks.length === 0) {
       statusText.textContent = "Please upload a JSON file";
@@ -351,54 +425,37 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
 
-    // Determine which URL to use
-    if (lockedConversationUrl) {
-      // Use locked URL
-      conversationUrl = lockedConversationUrl;
-      console.log(`[Panel] Using locked conversation URL: ${conversationUrl}`);
+    // Use locked URL only
+    conversationUrl = lockedConversationUrl;
+    console.log(`[Panel] Using locked conversation URL: ${conversationUrl}`);
 
-      // Get or create tab for the locked URL
-      const [existingTab] = await tabsQuery({
-        url: `${conversationUrl}*`,
-        currentWindow: true
-      });
+    // Get or create tab for the locked URL
+    const [existingTab] = await tabsQuery({
+      url: `${conversationUrl}*`,
+      currentWindow: true
+    });
 
-      if (existingTab && typeof existingTab.id === "number") {
-        currentTabId = existingTab.id;
-        await tabsUpdate(currentTabId, { active: true });
-      } else {
-        // Create new tab with locked URL
-        const newTab = await tabsCreate({ url: conversationUrl });
-        currentTabId = newTab.id ?? null;
-        if (currentTabId) {
-          const stepSettings = await storageGet<{
-            settings_stepDelay?: number;
-            settings_pageLoadTimeout?: number;
-          }>(["settings_stepDelay", "settings_pageLoadTimeout"]);
-          const pageLoadTimeoutMs =
-            (stepSettings.settings_pageLoadTimeout || 30) * 1000;
-          await waitForPageLoad(currentTabId, pageLoadTimeoutMs);
-          const rawStepDelay = stepSettings.settings_stepDelay;
-          const normalizedStepDelay =
-            rawStepDelay && rawStepDelay > 60 ? rawStepDelay / 1000 : rawStepDelay;
-          const tabReadyDelayMs = (normalizedStepDelay || 1) * 2 * 1000;
-          await new Promise((r) => setTimeout(r, tabReadyDelayMs));
-        }
-      }
+    if (existingTab && typeof existingTab.id === "number") {
+      currentTabId = existingTab.id;
+      await tabsUpdate(currentTabId, { active: true });
     } else {
-      // Get current tab (original behavior)
-      const [tab] = await tabsQuery({
-        active: true,
-        currentWindow: true
-      });
-      if (!tab || !tab.url || !tab.url.includes("gemini.google.com")) {
-        statusText.textContent = "Please open gemini.google.com or lock a URL";
-        statusText.style.color = "var(--danger)";
-        return;
+      // Create new tab with locked URL
+      const newTab = await tabsCreate({ url: conversationUrl });
+      currentTabId = newTab.id ?? null;
+      if (currentTabId) {
+        const stepSettings = await storageGet<{
+          settings_stepDelay?: number;
+          settings_pageLoadTimeout?: number;
+        }>(["settings_stepDelay", "settings_pageLoadTimeout"]);
+        const pageLoadTimeoutMs =
+          (stepSettings.settings_pageLoadTimeout || 30) * 1000;
+        await waitForPageLoad(currentTabId, pageLoadTimeoutMs);
+        const rawStepDelay = stepSettings.settings_stepDelay;
+        const normalizedStepDelay =
+          rawStepDelay && rawStepDelay > 60 ? rawStepDelay / 1000 : rawStepDelay;
+        const tabReadyDelayMs = (normalizedStepDelay || 1) * 2 * 1000;
+        await new Promise((r) => setTimeout(r, tabReadyDelayMs));
       }
-      currentTabId = tab.id ?? null;
-      conversationUrl = tab.url;
-      console.log(`[Panel] Conversation URL: ${conversationUrl}`);
     }
 
     if (!currentTabId) {
@@ -451,6 +508,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     currentIndex = 0;
     retryCounts.clear();
     skippedCount = 0;
+    failedCount = 0;
+    consecutiveFailureCount = 0;
+    nextTaskMode = "full";
+    failedCount = 0;
+    consecutiveFailureCount = 0;
+    nextTaskMode = "full";
     isRunning = true;
     updateUI(true);
     startTimer();
@@ -463,6 +526,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     isRunning = false;
     retryCounts.clear();
     skippedCount = 0;
+    failedCount = 0;
+    consecutiveFailureCount = 0;
+    nextTaskMode = "full";
     stopTimer();
     updateUI(false);
     statusText.textContent = "Stopped by user";
@@ -507,10 +573,18 @@ document.addEventListener("DOMContentLoaded", async () => {
       "lockedConversationUrl"
     ]);
     if (savedUrl.lockedConversationUrl) {
-      lockedConversationUrl = savedUrl.lockedConversationUrl;
-      conversationUrlInput.value = lockedConversationUrl;
-      urlStatus.textContent = "✅ URL locked - will use this conversation";
-      urlStatus.style.color = "var(--success)";
+      const candidate = savedUrl.lockedConversationUrl.trim();
+      const validation = validateLockedConversationUrl(candidate);
+      conversationUrlInput.value = candidate;
+      if (validation.ok) {
+        lockedConversationUrl = candidate;
+        urlStatus.textContent = "✅ URL locked - will use this conversation";
+        urlStatus.style.color = "var(--success)";
+      } else {
+        lockedConversationUrl = "";
+        urlStatus.textContent = `❌ ${validation.message}`;
+        urlStatus.style.color = "var(--danger)";
+      }
     }
 
     updateUI(false);
@@ -532,18 +606,21 @@ document.addEventListener("DOMContentLoaded", async () => {
       currentFileNameEl.textContent = "";
       const elapsedMs = Date.now() - startTime;
       const totalTasks = taskQueue.length;
-      const completedCount = Math.max(totalTasks - skippedCount, 0);
+      const completedCount = Math.max(totalTasks - skippedCount - failedCount, 0);
       const averageMs = totalTasks > 0 ? Math.round(elapsedMs / totalTasks) : 0;
       appendLogLine("--- Summary ---");
       appendLogLine(`Total tasks: ${totalTasks}`);
       appendLogLine(`Completed: ${completedCount}`);
       appendLogLine(`Skipped: ${skippedCount}`);
+      appendLogLine(`Failed: ${failedCount}`);
       appendLogLine(`Total time: ${formatDuration(elapsedMs)}`);
       appendLogLine(`Avg per task: ${formatDuration(averageMs)}`);
       return;
     }
 
     const task = taskQueue[currentIndex];
+    const taskMode = nextTaskMode;
+    nextTaskMode = "full";
     if (lastLogTaskIndex !== currentIndex) {
       clearLogOutput();
       lastLogTaskIndex = currentIndex;
@@ -562,12 +639,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     // Update progress
     progressText.textContent = `Task ${currentIndex + 1} of ${total}`;
     progressBar.style.width = `${((currentIndex + 1) / total) * 100}%`;
-    statusText.textContent = "Generating...";
+    statusText.textContent =
+      taskMode === "download-only" ? "Retrying download..." : "Generating...";
     statusText.style.color = "var(--text)";
     currentFileNameEl.textContent = `📷 ${displayName}`;
 
     // Save current task to storage
-    await storageSet({ currentTask: task });
+    await storageSet({ currentTask: task, currentTaskMode: taskMode });
 
     if (!currentTabId) {
       statusText.textContent = "Error: No active Gemini tab";
@@ -593,30 +671,105 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
-  async function handleTaskError(error: string) {
+  async function handleTaskError(error: string, errorType?: TaskErrorType) {
     console.error(`[Panel] Task error: ${error}`);
     if (!isRunning) return;
 
-    const settings = await storageGet<{ settings_maxRetries?: number }>([
-      "settings_maxRetries"
-    ]);
+    const settings = await storageGet<{
+      settings_maxRetries?: number;
+      settings_maxConsecutiveFailures?: number;
+    }>(["settings_maxRetries", "settings_maxConsecutiveFailures"]);
     const maxRetries = Math.max(0, settings.settings_maxRetries ?? 3);
+    const maxConsecutiveFailures = Math.max(
+      0,
+      settings.settings_maxConsecutiveFailures ?? 5
+    );
+    const resolvedErrorType: TaskErrorType =
+      errorType ??
+      (isFolderAuthErrorMessage(error)
+        ? "folder"
+        : isDownloadErrorMessage(error)
+          ? "download"
+          : "generation");
+
+    if (resolvedErrorType === "locked-url") {
+      statusText.textContent = error || "Locked URL error";
+      statusText.style.color = "var(--danger)";
+      appendLogLine(`Locked URL error - stopped: ${error}`);
+      isRunning = false;
+      stopTimer();
+      updateUI(false);
+      const storedUrl = await storageGet<{ lockedConversationUrl?: string }>([
+        "lockedConversationUrl"
+      ]);
+      const targetUrl = storedUrl.lockedConversationUrl || lockedConversationUrl;
+      if (targetUrl) {
+        conversationUrl = targetUrl;
+        try {
+          const newTab = await tabsCreate({ url: targetUrl, active: true });
+          currentTabId = newTab.id ?? null;
+        } catch (err) {
+          console.warn("[Panel] Failed to open locked URL tab:", err);
+        }
+      }
+      return;
+    }
+
+    if (resolvedErrorType === "folder") {
+      statusText.textContent = `Folder access error: ${error}`;
+      statusText.style.color = "var(--danger)";
+      appendLogLine(`Folder access error - stopped: ${error}`);
+      isRunning = false;
+      stopTimer();
+      updateUI(false);
+      return;
+    }
+
     const currentRetries = retryCounts.get(currentIndex) ?? 0;
 
     if (currentRetries < maxRetries) {
       const nextRetry = currentRetries + 1;
       retryCounts.set(currentIndex, nextRetry);
-      statusText.textContent = `Retrying (${nextRetry}/${maxRetries})...`;
+      const retryLabel =
+        resolvedErrorType === "download" ? "Retrying download" : "Retrying";
+      statusText.textContent = `${retryLabel} (${nextRetry}/${maxRetries})...`;
       statusText.style.color = "var(--warning)";
-      recreateTab();
+      if (resolvedErrorType === "download") {
+        nextTaskMode = "download-only";
+        void processNextTask();
+      } else {
+        nextTaskMode = "full";
+        recreateTab();
+      }
       return;
     }
 
-    statusText.textContent = `Error: ${error}`;
+    retryCounts.delete(currentIndex);
+    failedCount += 1;
+    consecutiveFailureCount += 1;
+    appendLogLine(`Failed task ${currentIndex + 1} (${resolvedErrorType}): ${error}`);
+    statusText.textContent = `Failed: ${error}`;
     statusText.style.color = "var(--danger)";
-    isRunning = false;
-    stopTimer();
-    updateUI(false);
+
+    if (maxConsecutiveFailures > 0 && consecutiveFailureCount >= maxConsecutiveFailures) {
+      statusText.textContent =
+        `Stopped after ${consecutiveFailureCount} consecutive failures. Last: ${error}`;
+      statusText.style.color = "var(--danger)";
+      isRunning = false;
+      stopTimer();
+      updateUI(false);
+      return;
+    }
+
+    currentIndex += 1;
+    updateRemainingTime();
+
+    if (currentIndex < taskQueue.length && isRunning) {
+      nextTaskMode = "full";
+      recreateTab();
+    } else {
+      void processNextTask();
+    }
   }
 
   // Listen for messages from content script
@@ -631,6 +784,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (request.skipped) {
         skippedCount += 1;
       }
+      consecutiveFailureCount = 0;
       currentIndex++;
 
       // Update remaining time estimate after each task completes
@@ -646,7 +800,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     if (request.action === "TASK_ERROR") {
-      void handleTaskError(request.error);
+      void handleTaskError(request.error, request.errorType);
     }
 
     if (request.action === "UPDATE_STATUS") {

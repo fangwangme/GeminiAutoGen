@@ -14,6 +14,7 @@ type TimingSettings = {
   settings_downloadPollInterval?: number;
   settings_downloadStabilityInterval?: number;
   settings_maxRetries?: number;
+  settings_maxConsecutiveFailures?: number;
   outputSubfolder?: string;
   sourceSubfolder?: string;
 };
@@ -73,6 +74,9 @@ const pollIntervalInput = document.getElementById(
 const maxRetriesInput = document.getElementById(
   "maxRetries"
 ) as HTMLInputElement;
+const maxConsecutiveFailuresInput = document.getElementById(
+  "maxConsecutiveFailures"
+) as HTMLInputElement;
 const saveSettingsBtn = document.getElementById(
   "saveSettingsBtn"
 ) as HTMLButtonElement;
@@ -87,7 +91,8 @@ const DEFAULTS = {
   settings_stepDelay: 1,
   settings_taskInterval: 5,
   settings_pollInterval: 1,
-  settings_maxRetries: 3
+  settings_maxRetries: 3,
+  settings_maxConsecutiveFailures: 5
 };
 
 // Load saved settings
@@ -107,7 +112,8 @@ async function loadSettings() {
     "settings_generationPollInterval",
     "settings_downloadPollInterval",
     "settings_downloadStabilityInterval",
-    "settings_maxRetries"
+    "settings_maxRetries",
+    "settings_maxConsecutiveFailures"
   ]);
 
   // Set Timing Inputs (or defaults)
@@ -140,6 +146,9 @@ async function loadSettings() {
   pollIntervalInput.value = String(fallbackPollInterval);
   maxRetriesInput.value = String(
     result.settings_maxRetries ?? DEFAULTS.settings_maxRetries
+  );
+  maxConsecutiveFailuresInput.value = String(
+    result.settings_maxConsecutiveFailures ?? DEFAULTS.settings_maxConsecutiveFailures
   );
 
   // Check Source Handle
@@ -208,6 +217,10 @@ saveSettingsBtn.addEventListener("click", async () => {
       settings_maxRetries: toCountNumber(
         maxRetriesInput.value,
         DEFAULTS.settings_maxRetries
+      ),
+      settings_maxConsecutiveFailures: toCountNumber(
+        maxConsecutiveFailuresInput.value,
+        DEFAULTS.settings_maxConsecutiveFailures
       )
     };
 
