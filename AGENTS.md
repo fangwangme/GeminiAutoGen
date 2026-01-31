@@ -55,3 +55,14 @@ GeminiAutoGen/                      # Main repo (active workspace)
 1. **Modify**: Maintain project style and keep changes atomic.
 2. **Verify**: Run tests/builds within the active workspace after changes.
 3. **Safety**: NEVER hardcode or log API keys/secrets.
+
+## Release Checklist
+When releasing a new version:
+1. Update version in BOTH files:
+   - `manifest.json` (for Chrome extension version)
+   - `package.json` (for npm/version tracking)
+2. Commit version bump: `git add manifest.json package.json && git commit -m "chore: bump version to X.Y.Z"`
+3. Push to dev: `git push origin dev`
+4. Create PR to main and merge
+5. Build: `npm run build`
+6. Create GitHub release
