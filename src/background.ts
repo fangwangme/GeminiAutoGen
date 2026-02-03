@@ -1,4 +1,10 @@
 import { getHandle } from "./utils/idb.js";
+import {
+  createTranslator,
+  DEFAULT_LANGUAGE,
+  LANGUAGE_STORAGE_KEY,
+  normalizeLanguage
+} from "./i18n.js";
 
 const formatLogTimestamp = () => new Date().toISOString();
 const attachConsoleTimestamps = () => {
@@ -43,8 +49,16 @@ type DownloadSettings = {
   settings_downloadStabilityInterval?: number;
 };
 
+type Translator = (key: string, vars?: Record<string, string | number>) => string;
+
 const storageGet = <T,>(keys: string[]): Promise<T> =>
   chrome.storage.local.get(keys) as unknown as Promise<T>;
+
+const getTranslator = async () => {
+  const data = await storageGet<Record<string, unknown>>([LANGUAGE_STORAGE_KEY]);
+  const language = normalizeLanguage(data[LANGUAGE_STORAGE_KEY] as string | undefined);
+  return createTranslator(language || DEFAULT_LANGUAGE);
+};
 
 const normalizePositive = (value: number | undefined, fallback: number) =>
   typeof value === "number" && value > 0 ? value : fallback;
@@ -125,7 +139,8 @@ chrome.runtime.onMessage.addListener(
 
     // A. Check File Exists (Output Directory)
     if (request.action === "CHECK_FILE_EXISTS") {
-      checkFileExistsFS(request.filename)
+      getTranslator()
+        .then((translator) => checkFileExistsFS(request.filename, translator))
         .then((exists) => sendResponse({ exists }))
         .catch((err) => {
           const message = toErrorMessage(err);
@@ -140,10 +155,17 @@ chrome.runtime.onMessage.addListener(
 
     // B. Wait for Download and Rename (Polling Mode)
     if (request.action === "WAIT_AND_RENAME") {
-      waitForDownloadAndRename(request.targetFilename, {
-        tabId: sender.tab?.id,
-        windowId: sender.tab?.windowId
-      })
+      getTranslator()
+        .then((translator) =>
+          waitForDownloadAndRename(
+            request.targetFilename,
+            {
+              tabId: sender.tab?.id,
+              windowId: sender.tab?.windowId
+            },
+            translator
+          )
+        )
         .then((result) => sendResponse(result))
         .catch((err) => {
           const message = toErrorMessage(err);
@@ -212,10 +234,10 @@ async function getOutputHandle(): Promise<FileSystemDirectoryHandle | null> {
   }
 }
 
-async function checkFileExistsFS(filename: string): Promise<boolean> {
+async function checkFileExistsFS(filename: string, t: Translator): Promise<boolean> {
   const outputHandle = await getOutputHandle();
   if (!outputHandle) {
-    throw new Error("Missing directory handles. Please configure in Options.");
+    throw new Error(t("errors.missingDirectoryHandles"));
   }
 
   try {
@@ -253,7 +275,8 @@ async function calculateFileHash(arrayBuffer: ArrayBuffer): Promise<string> {
 
 async function waitForDownloadAndRename(
   targetFilename: string,
-  tabInfo?: { tabId?: number; windowId?: number }
+  tabInfo: { tabId?: number; windowId?: number } | undefined,
+  t: Translator
 ): Promise<WaitAndRenameResult> {
   const sourceHandle = await getSourceHandle();
   const outputHandle = await getOutputHandle();
@@ -283,7 +306,7 @@ async function waitForDownloadAndRename(
   if (!sourceHandle || !outputHandle) {
     return {
       success: false,
-      error: "Missing directory handles. Please configure in Options.",
+      error: t("errors.missingDirectoryHandles"),
       errorType: "folder"
     };
   }
@@ -292,7 +315,7 @@ async function waitForDownloadAndRename(
   if (!sourceValues) {
     return {
       success: false,
-      error: "Directory iteration is not supported in this browser.",
+      error: t("errors.directoryIterationNotSupported"),
       errorType: "folder"
     };
   }
@@ -412,8 +435,7 @@ async function waitForDownloadAndRename(
 
           return {
             success: false,
-            error:
-              "Image is square (1:1). Generation failed (expected 16:9). Workflow stopped.",
+            error: t("errors.imageSquareGenerationFailed"),
             errorType: "generation"
           };
         }
@@ -453,7 +475,7 @@ async function waitForDownloadAndRename(
           await sourceHandle.removeEntry(newFile);
           return {
             success: false,
-            error: "Duplicate image detected - workflow terminated",
+            error: t("errors.duplicateImage"),
             errorType: "generation"
           };
         }
@@ -487,7 +509,7 @@ async function waitForDownloadAndRename(
 
   return {
     success: false,
-    error: "Timeout waiting for download",
+    error: t("errors.timeoutWaitingDownload"),
     errorType: "download"
   };
 }

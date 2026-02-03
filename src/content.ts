@@ -1,4 +1,114 @@
 import type { TaskItem } from "./types.js";
+type Language = "en" | "zh";
+
+const LANGUAGE_STORAGE_KEY = "uiLanguage";
+const DEFAULT_LANGUAGE: Language = "en";
+
+const translations: Record<Language, Record<string, string>> = {
+  en: {
+    "content.status.retryingDownload": "Retrying download...",
+    "content.status.downloading": "Downloading...",
+    "content.status.waitingForFile": "Waiting for file...",
+    "content.status.processing": "Processing: {{name}}",
+    "content.status.skipped": "Skipped: {{name}}",
+    "content.status.complete": "Complete: {{name}}",
+    "content.status.generating": "Generating...",
+    "content.status.error": "Error: {{message}}",
+    "content.error.existingResponseNotFound":
+      "Existing response not found for download-only retry",
+    "content.error.timeoutExistingResponse":
+      "Timeout waiting for existing response",
+    "content.error.noDownloadButtons": "No download buttons found after generation",
+    "content.error.noDownloadButton": "No download button found after generation",
+    "content.error.fileRenameFailed": "File rename failed",
+    "content.error.lockedUrlRequired":
+      "Locked conversation URL is required. Please lock a Gemini chat URL.",
+    "content.error.lockedUrlMismatch":
+      "Locked URL mismatch. Expected {{expected}}, got {{actual}}",
+    "content.error.timeoutInputField": "Timeout waiting for Input Field",
+    "content.error.inputFieldNotFound": "Input field not found after wait",
+    "content.error.pageStabilityTimeout":
+      "Page stability timeout ({{seconds}}s) - images not loaded",
+    "content.error.failedToWritePrompt": "Failed to write prompt into input field",
+    "content.error.timeoutSendButton": "Timeout waiting for Send Button",
+    "content.error.sendButtonNotFound": "Send button not found after wait",
+    "content.error.sendDidNotClearInput": "Send click did not clear input",
+    "content.error.timeoutPromptRender": "Timeout waiting for prompt render",
+    "content.error.timeoutConversationContainer":
+      "Timeout waiting for conversation container",
+    "content.error.promptAnchorNotFound":
+      "Prompt anchor not found; aborting to avoid downloading the wrong image",
+    "content.error.timeoutDownloadButton": "Timeout waiting for Download Button",
+    "validation.lockedUrl.mustGemini": "Locked URL must be a Gemini URL",
+    "validation.lockedUrl.mustSpecificConversation":
+      "Locked URL is a new conversation URL (use a specific chat URL)",
+    "validation.lockedUrl.mustConversation":
+      "Locked URL must be a Gemini conversation URL",
+    "validation.lockedUrl.invalid": "Locked URL is invalid"
+  },
+  zh: {
+    "content.status.retryingDownload": "正在重试下载...",
+    "content.status.downloading": "正在下载...",
+    "content.status.waitingForFile": "等待文件...",
+    "content.status.processing": "处理中：{{name}}",
+    "content.status.skipped": "已跳过：{{name}}",
+    "content.status.complete": "完成：{{name}}",
+    "content.status.generating": "正在生成...",
+    "content.status.error": "错误：{{message}}",
+    "content.error.existingResponseNotFound": "未找到可用于仅下载重试的已有响应",
+    "content.error.timeoutExistingResponse": "等待已有响应超时",
+    "content.error.noDownloadButtons": "生成后未找到下载按钮",
+    "content.error.noDownloadButton": "生成后未找到下载按钮",
+    "content.error.fileRenameFailed": "文件重命名失败",
+    "content.error.lockedUrlRequired":
+      "需要锁定的对话链接。请先锁定 Gemini 对话链接。",
+    "content.error.lockedUrlMismatch":
+      "锁定链接不匹配。期望 {{expected}}，实际 {{actual}}",
+    "content.error.timeoutInputField": "等待输入框超时",
+    "content.error.inputFieldNotFound": "等待后仍未找到输入框",
+    "content.error.pageStabilityTimeout": "页面稳定超时（{{seconds}}秒）- 图片未加载",
+    "content.error.failedToWritePrompt": "写入提示词失败",
+    "content.error.timeoutSendButton": "等待发送按钮超时",
+    "content.error.sendButtonNotFound": "等待后仍未找到发送按钮",
+    "content.error.sendDidNotClearInput": "点击发送后未清空输入框",
+    "content.error.timeoutPromptRender": "等待提示渲染超时",
+    "content.error.timeoutConversationContainer": "等待对话容器超时",
+    "content.error.promptAnchorNotFound":
+      "未找到提示锚点；为避免下载错误图片已中止",
+    "content.error.timeoutDownloadButton": "等待下载按钮超时",
+    "validation.lockedUrl.mustGemini": "锁定链接必须是 Gemini 链接",
+    "validation.lockedUrl.mustSpecificConversation":
+      "锁定链接是新对话链接（请使用具体对话链接）",
+    "validation.lockedUrl.mustConversation": "锁定链接必须是 Gemini 对话链接",
+    "validation.lockedUrl.invalid": "锁定链接无效"
+  }
+};
+
+const normalizeLanguage = (value?: string): Language =>
+  value === "zh" ? "zh" : "en";
+
+const interpolate = (template: string, vars?: Record<string, string | number>) => {
+  if (!vars) return template;
+  return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
+    const value = vars[key];
+    return value === undefined ? "" : String(value);
+  });
+};
+
+const createTranslator = (language: Language) =>
+  (key: string, vars?: Record<string, string | number>) => {
+    const template = translations[language][key] || translations.en[key] || key;
+    return interpolate(template, vars);
+  };
+
+const getStoredLanguage = async (): Promise<Language> => {
+  const result = (await chrome.storage.local.get([
+    LANGUAGE_STORAGE_KEY
+  ])) as unknown as Record<string, unknown>;
+  return normalizeLanguage(result[LANGUAGE_STORAGE_KEY] as string | undefined);
+};
+
+let t = createTranslator(DEFAULT_LANGUAGE);
 
 type TaskErrorType = "generation" | "download" | "folder" | "locked-url";
 type TaskMode = "full" | "download-only";
@@ -73,25 +183,28 @@ const validateLockedConversationUrl = (url: string) => {
   try {
     const parsed = new URL(url);
     if (!isGeminiHost(parsed.hostname)) {
-      return { ok: false, message: "Locked URL must be a Gemini URL" } as const;
+      return {
+        ok: false,
+        message: t("validation.lockedUrl.mustGemini")
+      } as const;
     }
     const normalizedPath = parsed.pathname.replace(/\/$/, "");
     const pathWithoutAccount = normalizedPath.replace(/^\/u\/\d+/, "");
     if (pathWithoutAccount === "/app") {
       return {
         ok: false,
-        message: "Locked URL is a new conversation URL (use a specific chat URL)"
+        message: t("validation.lockedUrl.mustSpecificConversation")
       } as const;
     }
     if (!pathWithoutAccount.includes("/app/")) {
       return {
         ok: false,
-        message: "Locked URL must be a Gemini conversation URL"
+        message: t("validation.lockedUrl.mustConversation")
       } as const;
     }
     return { ok: true } as const;
   } catch {
-    return { ok: false, message: "Locked URL is invalid" } as const;
+    return { ok: false, message: t("validation.lockedUrl.invalid") } as const;
   }
 };
 
@@ -143,6 +256,9 @@ const logError = (message: string, data?: unknown) =>
 // This script processes ONE task and then signals completion
 
 (async function () {
+  const language = await getStoredLanguage();
+  t = createTranslator(language);
+
   // 0. Load Settings
   const settings = await storageGet<ContentSettings>([
     "settings_generationTimeout",
@@ -817,7 +933,7 @@ const logError = (message: string, data?: unknown) =>
     logInfo("[Content] Download-only mode: locating existing response", {
       filename
     });
-    updateStatus("Retrying download...");
+    updateStatus(t("content.status.retryingDownload"));
 
     let responseContainer: Element | null = null;
 
@@ -838,7 +954,7 @@ const logError = (message: string, data?: unknown) =>
 
     if (!responseContainer) {
       throw new TaskError(
-        "Existing response not found for download-only retry",
+        t("content.error.existingResponseNotFound"),
         "generation"
       );
     }
@@ -868,7 +984,7 @@ const logError = (message: string, data?: unknown) =>
       },
       CONFIG_GEN_TIMEOUT,
       CONFIG_POLL,
-      "Timeout waiting for existing response"
+      t("content.error.timeoutExistingResponse")
     );
 
     const latestDownloadButtons = getDownloadButtonsInContainer(responseContainer, true);
@@ -885,7 +1001,7 @@ const logError = (message: string, data?: unknown) =>
   }) {
     const { filename, responseContainer, latestDownloadButtons, latestNewImages } =
       params;
-    updateStatus("Downloading...");
+    updateStatus(t("content.status.downloading"));
 
     let targetBtn: HTMLButtonElement | null = null;
 
@@ -937,14 +1053,14 @@ const logError = (message: string, data?: unknown) =>
       }
 
       if (!downloadBtns.length) {
-        throw new TaskError("No download buttons found after generation", "generation");
+        throw new TaskError(t("content.error.noDownloadButtons"), "generation");
       }
       const lastBtn = downloadBtns[downloadBtns.length - 1];
       targetBtn = nearestButton || lastBtn;
     }
 
     if (!targetBtn) {
-      throw new TaskError("No download button found after generation", "generation");
+      throw new TaskError(t("content.error.noDownloadButton"), "generation");
     }
 
     logInfo("[Content] Clicking download", {
@@ -972,7 +1088,7 @@ const logError = (message: string, data?: unknown) =>
     clickDownloadButton(targetBtn);
     await clickDownloadMenuItem();
 
-    updateStatus("Waiting for file...");
+    updateStatus(t("content.status.waitingForFile"));
     const renameResult = await runtimeSendMessage<WaitAndRenameResponse>({
       action: "WAIT_AND_RENAME",
       targetFilename: filename
@@ -984,7 +1100,10 @@ const logError = (message: string, data?: unknown) =>
         : renameResult?.error && isFolderAuthErrorMessage(renameResult.error)
           ? "folder"
           : "download";
-      throw new TaskError(renameResult?.error || "File rename failed", fallbackType);
+      throw new TaskError(
+        renameResult?.error || t("content.error.fileRenameFailed"),
+        fallbackType
+      );
     }
   }
 
@@ -1012,7 +1131,11 @@ const logError = (message: string, data?: unknown) =>
     }
 
     logInfo(`[Content] Processing: ${task.name}`);
-    updateStatus(`Processing: ${task.name}`);
+    updateStatus(
+      t("content.status.processing", {
+        name: task.name
+      })
+    );
 
     // 2. Prepare filename for skip check
     let filename = task.name.replace(/[^a-z0-9_\-.]/gi, "_");
@@ -1043,14 +1166,18 @@ const logError = (message: string, data?: unknown) =>
 
     if (checkResult && checkResult.exists) {
       logInfo(`[Content] File exists, skipping: ${filename}`);
-      updateStatus(`Skipped: ${task.name}`);
+      updateStatus(
+        t("content.status.skipped", {
+          name: task.name
+        })
+      );
       runtimeSendMessage<void>({ action: "TASK_COMPLETE", skipped: true });
       return;
     }
 
     if (!lockedConversationUrl) {
       throw new TaskError(
-        "Locked conversation URL is required. Please lock a Gemini chat URL.",
+        t("content.error.lockedUrlRequired"),
         "locked-url"
       );
     }
@@ -1061,7 +1188,10 @@ const logError = (message: string, data?: unknown) =>
     const currentUrl = window.location.href;
     if (!urlsMatch(lockedConversationUrl, currentUrl)) {
       throw new TaskError(
-        `Locked URL mismatch. Expected ${lockedConversationUrl}, got ${currentUrl}`,
+        t("content.error.lockedUrlMismatch", {
+          expected: lockedConversationUrl,
+          actual: currentUrl
+        }),
         "locked-url"
       );
     }
@@ -1081,7 +1211,11 @@ const logError = (message: string, data?: unknown) =>
         latestNewImages: downloadContext.latestNewImages
       });
       logInfo(`[Content] Task complete: ${task.name}`);
-      updateStatus(`Complete: ${task.name}`);
+      updateStatus(
+        t("content.status.complete", {
+          name: task.name
+        })
+      );
       runtimeSendMessage<void>({ action: "TASK_COMPLETE", skipped: false });
       return;
     }
@@ -1118,7 +1252,7 @@ const logError = (message: string, data?: unknown) =>
         },
         CONFIG_INPUT_TIMEOUT,
         CONFIG_POLL,
-        "Timeout waiting for Input Field"
+        t("content.error.timeoutInputField")
       );
     } catch (err) {
       logError("[Content] Input field wait timed out", {
@@ -1132,7 +1266,7 @@ const logError = (message: string, data?: unknown) =>
     });
 
     if (!inputField) {
-      throw new Error("Input field not found after wait");
+      throw new Error(t("content.error.inputFieldNotFound"));
     }
     const initialInputField = inputField as HTMLElement;
 
@@ -1161,7 +1295,9 @@ const logError = (message: string, data?: unknown) =>
       if (Date.now() - stabilityStart > stabilityTimeout) {
         const timeoutSeconds = Math.round(stabilityTimeout / 1000);
         throw new Error(
-          `Page stability timeout (${timeoutSeconds}s) - images not loaded`
+          t("content.error.pageStabilityTimeout", {
+            seconds: timeoutSeconds
+          })
         );
       }
 
@@ -1233,7 +1369,7 @@ const logError = (message: string, data?: unknown) =>
       composedPrompt
     );
     if (!promptWritten) {
-      throw new Error("Failed to write prompt into input field");
+      throw new Error(t("content.error.failedToWritePrompt"));
     }
 
     // Wait 1 second before clicking send
@@ -1257,11 +1393,11 @@ const logError = (message: string, data?: unknown) =>
       },
       CONFIG_SEND_TIMEOUT,
       CONFIG_POLL,
-      "Timeout waiting for Send Button"
+      t("content.error.timeoutSendButton")
     );
 
     if (!sendBtn) {
-      throw new Error("Send button not found after wait");
+      throw new Error(t("content.error.sendButtonNotFound"));
     }
     const sendButton = sendBtn as HTMLButtonElement;
 
@@ -1311,7 +1447,7 @@ const logError = (message: string, data?: unknown) =>
       },
       CONFIG_INPUT_TIMEOUT,
       CONFIG_POLL,
-      "Send click did not clear input"
+      t("content.error.sendDidNotClearInput")
     );
 
     const getLatestUserQueryAfter = () => {
@@ -1335,7 +1471,7 @@ const logError = (message: string, data?: unknown) =>
         },
         CONFIG_INPUT_TIMEOUT,
         CONFIG_POLL,
-        "Timeout waiting for prompt render"
+        t("content.error.timeoutPromptRender")
       );
     } catch {
       logWarn("[Content] Prompt render wait timed out");
@@ -1357,7 +1493,7 @@ const logError = (message: string, data?: unknown) =>
         },
         CONFIG_INPUT_TIMEOUT,
         CONFIG_POLL,
-        "Timeout waiting for conversation container"
+        t("content.error.timeoutConversationContainer")
       );
     } catch {
       const containers = document.querySelectorAll(".conversation-container");
@@ -1402,9 +1538,7 @@ const logError = (message: string, data?: unknown) =>
       hasNewConversationContainer
     });
     if (!promptAnchor) {
-      throw new Error(
-        "Prompt anchor not found; aborting to avoid downloading the wrong image"
-      );
+      throw new Error(t("content.error.promptAnchorNotFound"));
     }
     let responseContainer: Element | null = getResponseContainerForAnchor(promptAnchor);
     const resolveResponseContainer = () => {
@@ -1419,7 +1553,7 @@ const logError = (message: string, data?: unknown) =>
     }
 
     // 7. Wait for generation
-    updateStatus("Generating...");
+    updateStatus(t("content.status.generating"));
 
     // CRITICAL: Record counts BEFORE sending prompt
     // This prevents detecting old buttons/images from previous responses
@@ -1606,7 +1740,7 @@ const logError = (message: string, data?: unknown) =>
         },
         CONFIG_GEN_TIMEOUT,
         CONFIG_POLL,
-        "Timeout waiting for Download Button"
+        t("content.error.timeoutDownloadButton")
       );
     } catch (err) {
       const stopBtn = getStopButton();
@@ -1633,7 +1767,11 @@ const logError = (message: string, data?: unknown) =>
     });
 
     logInfo(`[Content] Task complete: ${task.name}`);
-    updateStatus(`Complete: ${task.name}`);
+    updateStatus(
+      t("content.status.complete", {
+        name: task.name
+      })
+    );
     runtimeSendMessage<void>({ action: "TASK_COMPLETE", skipped: false });
   } catch (err) {
     const message = toErrorMessage(err);
@@ -1646,7 +1784,12 @@ const logError = (message: string, data?: unknown) =>
             ? "download"
             : "generation";
     logError("[Content] Error", { message, errorType });
-    updateStatus(`Error: ${message}`, true);
+    updateStatus(
+      t("content.status.error", {
+        message
+      }),
+      true
+    );
     runtimeSendMessage<void>({
       action: "TASK_ERROR",
       error: message,

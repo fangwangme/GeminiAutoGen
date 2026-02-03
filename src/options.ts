@@ -1,4 +1,14 @@
 import { setHandle, getHandle } from "./utils/idb.js";
+import {
+  applyI18n,
+  createTranslator,
+  DEFAULT_LANGUAGE,
+  getStoredLanguage,
+  Language,
+  LANGUAGE_STORAGE_KEY,
+  normalizeLanguage,
+  setStoredLanguage
+} from "./i18n.js";
 
 type TimingSettings = {
   settings_generationTimeout?: number;
@@ -17,6 +27,7 @@ type TimingSettings = {
   settings_maxConsecutiveFailures?: number;
   outputSubfolder?: string;
   sourceSubfolder?: string;
+  uiLanguage?: string;
 };
 
 type DirectoryPickerOptions = {
@@ -81,6 +92,45 @@ const saveSettingsBtn = document.getElementById(
   "saveSettingsBtn"
 ) as HTMLButtonElement;
 const saveStatus = document.getElementById("saveStatus") as HTMLDivElement;
+const languageSelect = document.getElementById(
+  "languageSelect"
+) as HTMLSelectElement;
+
+let currentLanguage: Language = DEFAULT_LANGUAGE;
+let t = createTranslator(currentLanguage);
+
+const setDocumentLanguage = (language: Language) => {
+  document.documentElement.lang = language === "zh" ? "zh-CN" : "en";
+  document.title = t("options.documentTitle");
+};
+
+const renderLanguageOptions = () => {
+  if (!languageSelect) return;
+  languageSelect.textContent = "";
+  const options = [
+    { value: "en", label: t("language.english") },
+    { value: "zh", label: t("language.chinese") }
+  ];
+  options.forEach((option) => {
+    const element = document.createElement("option");
+    element.value = option.value;
+    element.textContent = option.label;
+    languageSelect.appendChild(element);
+  });
+  languageSelect.value = currentLanguage;
+};
+
+const applyTranslations = () => {
+  applyI18n(document, t);
+  renderLanguageOptions();
+  setDocumentLanguage(currentLanguage);
+};
+
+const applyLanguage = (language: Language) => {
+  currentLanguage = language;
+  t = createTranslator(currentLanguage);
+  applyTranslations();
+};
 
 // Default Values (seconds)
 const DEFAULTS = {
@@ -100,6 +150,7 @@ async function loadSettings() {
   const result = await storageGet<TimingSettings>([
     "outputSubfolder",
     "sourceSubfolder",
+    LANGUAGE_STORAGE_KEY,
     "settings_generationTimeout",
     "settings_downloadTimeout",
     "settings_pageLoadTimeout",
@@ -154,19 +205,27 @@ async function loadSettings() {
   // Check Source Handle
   const sourceHandle = await getHandle<FileSystemDirectoryHandle>("sourceHandle");
   if (sourceHandle) {
-    sourceStatus.textContent = `✅ Selected: ${sourceHandle.name}`;
+    sourceStatus.textContent = t("options.status.selected", {
+      name: sourceHandle.name
+    });
     sourceStatus.className = "status success";
   } else if (result.sourceSubfolder) {
-    sourceStatus.textContent = `⚠️ Saved: ${result.sourceSubfolder} (Re-select needed)`;
+    sourceStatus.textContent = t("options.status.savedNeedsReselect", {
+      name: result.sourceSubfolder
+    });
   }
 
   // Check Output Handle
   const outputHandle = await getHandle<FileSystemDirectoryHandle>("outputHandle");
   if (outputHandle) {
-    outputStatus.textContent = `✅ Selected: ${outputHandle.name}`;
+    outputStatus.textContent = t("options.status.selected", {
+      name: outputHandle.name
+    });
     outputStatus.className = "status success";
   } else if (result.outputSubfolder) {
-    outputStatus.textContent = `⚠️ Saved: ${result.outputSubfolder} (Re-select needed)`;
+    outputStatus.textContent = t("options.status.savedNeedsReselect", {
+      name: result.outputSubfolder
+    });
   }
 }
 
@@ -233,19 +292,24 @@ saveSettingsBtn.addEventListener("click", async () => {
       "settings_downloadStabilityInterval"
     ]);
 
-    saveStatus.textContent = "✅ Settings Saved!";
+    saveStatus.textContent = t("options.status.settingsSaved");
     saveStatus.className = "status success";
     setTimeout(() => {
       saveStatus.textContent = "";
     }, 3000);
   } catch (err) {
     console.error(err);
-    saveStatus.textContent = "❌ Error Saving";
+    saveStatus.textContent = t("options.status.errorSaving");
     saveStatus.className = "status error";
   }
 });
 
-void loadSettings();
+const initLanguage = async () => {
+  const storedLanguage = await getStoredLanguage();
+  applyLanguage(storedLanguage);
+};
+
+void initLanguage().then(loadSettings);
 
 // Select Source Folder
 selectSourceBtn.addEventListener("click", async () => {
@@ -258,7 +322,9 @@ selectSourceBtn.addEventListener("click", async () => {
     await setHandle("sourceHandle", handle);
     await storageSet({ sourceSubfolder: handle.name });
 
-    sourceStatus.textContent = `✅ Selected: ${handle.name}`;
+    sourceStatus.textContent = t("options.status.selected", {
+      name: handle.name
+    });
     sourceStatus.className = "status success";
   } catch (err) {
     console.error(err);
@@ -276,10 +342,32 @@ selectOutputBtn.addEventListener("click", async () => {
     await setHandle("outputHandle", handle);
     await storageSet({ outputSubfolder: handle.name });
 
-    outputStatus.textContent = `✅ Selected: ${handle.name}`;
+    outputStatus.textContent = t("options.status.selected", {
+      name: handle.name
+    });
     outputStatus.className = "status success";
   } catch (err) {
     console.error(err);
+  }
+});
+
+if (languageSelect) {
+  languageSelect.addEventListener("change", async () => {
+    const selected = normalizeLanguage(languageSelect.value);
+    await setStoredLanguage(selected);
+    applyLanguage(selected);
+    await loadSettings();
+  });
+}
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local" || !changes[LANGUAGE_STORAGE_KEY]) return;
+  const nextLanguage = normalizeLanguage(
+    changes[LANGUAGE_STORAGE_KEY].newValue as string | undefined
+  );
+  if (nextLanguage !== currentLanguage) {
+    applyLanguage(nextLanguage);
+    void loadSettings();
   }
 });
 

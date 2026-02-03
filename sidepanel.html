@@ -111,6 +111,14 @@
             min-height: 0;
         }
 
+        .log-panel.is-collapsed {
+            flex: 0 0 auto;
+        }
+
+        .log-panel.is-collapsed .log-output {
+            display: none;
+        }
+
         .log-header {
             display: flex;
             align-items: center;
@@ -195,20 +203,20 @@
 <body>
     <div class="container">
         <div style="display: flex; justify-content: space-between; align-items: center;">
-            <h3>Gemini AutoGen</h3>
+            <h3 data-i18n="sidepanel.title">Gemini AutoGen</h3>
             <button id="settingsBtn"
-                style="padding: 6px 10px; font-size: 12px; background: var(--button-bg); color: var(--text); border: 1px solid var(--button-border); border-radius: 4px;">⚙️
+                style="padding: 6px 10px; font-size: 12px; background: var(--button-bg); color: var(--text); border: 1px solid var(--button-border); border-radius: 4px;" data-i18n="sidepanel.settings">⚙️
                 Settings</button>
         </div>
 
         <!-- Conversation URL Lock -->
         <div style="border: 1px solid var(--panel-border); padding: 12px; border-radius: 4px; background: var(--panel-bg);">
-            <label style="display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px;">🔒 Locked Conversation URL</label>
+            <label style="display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px;" data-i18n="sidepanel.lockedUrl.label">🔒 Locked Conversation URL</label>
             <div style="display: flex; gap: 5px;">
-                <input type="text" id="conversationUrlInput" placeholder="Paste Gemini chat URL here..." 
+                <input type="text" id="conversationUrlInput" placeholder="Paste Gemini chat URL here..." data-i18n-placeholder="sidepanel.lockedUrl.placeholder"
                     style="flex: 1; padding: 7px 9px; font-size: 12px; border: 1px solid var(--panel-border); border-radius: 4px; background: var(--bg); color: var(--text);">
-                <button id="lockUrlBtn" style="padding: 7px 12px; font-size: 11px; background: var(--primary); color: white; border: none; border-radius: 4px;">Lock</button>
-                <button id="clearUrlBtn" style="padding: 7px 12px; font-size: 11px; background: var(--danger); color: white; border: none; border-radius: 4px;">Clear</button>
+                <button id="lockUrlBtn" style="padding: 7px 12px; font-size: 11px; background: var(--primary); color: white; border: none; border-radius: 4px;" data-i18n="sidepanel.lockedUrl.lock">Lock</button>
+                <button id="clearUrlBtn" style="padding: 7px 12px; font-size: 11px; background: var(--danger); color: white; border: none; border-radius: 4px;" data-i18n="sidepanel.lockedUrl.clear">Clear</button>
             </div>
             <div id="urlStatus" style="margin-top: 6px; font-size: 11px; color: var(--muted);">No URL locked</div>
         </div>
@@ -219,10 +227,10 @@
         </div>
 
         <div style="display: flex; gap: 10px;">
-            <button id="startBtn" style="flex: 1; background: var(--success); color: white; border: none; padding: 10px 8px;">Start</button>
+            <button id="startBtn" style="flex: 1; background: var(--success); color: white; border: none; padding: 10px 8px;" data-i18n="sidepanel.buttons.start">Start</button>
             <button id="stopBtn" style="flex: 1; background: var(--danger); color: white; border: none; padding: 10px 8px;"
-                disabled>Stop</button>
-            <button id="resetBtn" style="flex: 1; background: var(--warning); color: white; border: none; padding: 10px 8px;">Reset</button>
+                disabled data-i18n="sidepanel.buttons.stop">Stop</button>
+            <button id="resetBtn" style="flex: 1; background: var(--warning); color: white; border: none; padding: 10px 8px;" data-i18n="sidepanel.buttons.reset">Reset</button>
         </div>
 
         <div class="status-bar">
@@ -239,16 +247,17 @@
 
         <div class="log-panel">
             <div class="log-header">
-                <span>Log</span>
+                <span data-i18n="sidepanel.log.title">Log</span>
                 <div class="log-actions">
-                    <button id="logCopyBtn" class="log-btn">Copy</button>
-                    <button id="logClearBtn" class="log-btn">Clear</button>
+                    <button id="logToggleBtn" class="log-btn" data-i18n="sidepanel.log.toggle.hide">Hide</button>
+                    <button id="logCopyBtn" class="log-btn" data-i18n="sidepanel.log.copy">Copy</button>
+                    <button id="logClearBtn" class="log-btn" data-i18n="sidepanel.log.clear">Clear</button>
                 </div>
             </div>
             <div id="logOutput" class="log-output"></div>
         </div>
     </div>
-    <script src="sidepanel.js"></script>
+    <script type="module" src="sidepanel.js"></script>
 </body>
 
 </html>

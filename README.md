@@ -1,8 +1,10 @@
 # Gemini Auto Image Generator
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 A Chrome Extension that automates batch image generation on Google Gemini. Load a JSON file with image prompts, and the extension will automatically generate high-resolution images (~5MB each) and save them with custom filenames.
 
-![Screenshot](docs/images/screenshot.png)
+![Screenshot](docs/images/image-en.png)
 
 ## ✨ Features
 
@@ -13,7 +15,8 @@ A Chrome Extension that automates batch image generation on Google Gemini. Load 
 - **Progress Tracking** - Real-time progress bar with elapsed/remaining time estimates
 - **Auto-Rename** - Automatically renames downloaded files to your specified names
 - **Retry on Failure** - Auto-retry per image with configurable limits
-- **Live Log Window** - Inline log viewer with copy/clear controls
+- **Collapsible Log Window** - Inline log viewer with copy/clear controls
+- **Bilingual UI** - English/中文 language switch in Settings
 - **Dark Mode UI** - Side panel follows system light/dark theme
 
 ## 📦 Installation
@@ -44,6 +47,8 @@ Before using the extension, you need to configure the file directories:
 
 3. **Output Folder** - The final destination folder for renamed images (e.g., `Downloads/GeminiOutput`)
    - Images will be automatically renamed and moved here
+
+4. **Language** - Choose the UI language (English/中文)
 
 ![Settings](docs/images/settings.png)
 
@@ -101,6 +106,7 @@ The extension will:
 ├── src/content.ts     # Single-task processor (IIFE)
 ├── src/background.ts  # File system operations
 ├── src/options.ts     # Directory configuration
+├── src/i18n.ts        # UI translations
 └── src/utils/idb.ts   # IndexedDB wrapper for handles
 ```
 
