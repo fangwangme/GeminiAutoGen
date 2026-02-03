@@ -58,11 +58,15 @@ GeminiAutoGen/                      # Main repo (active workspace)
 
 ## Release Checklist
 When releasing a new version:
-1. Update version in BOTH files:
-   - `manifest.json` (for Chrome extension version)
-   - `package.json` (for npm/version tracking)
+1. Always update version in BOTH files (must stay in sync):
+   - `manifest.json` (Chrome extension version)
+   - `package.json` (npm/version tracking)
 2. Commit version bump: `git add manifest.json package.json && git commit -m "chore: bump version to X.Y.Z"`
 3. Push to dev: `git push origin dev`
 4. Create PR to main and merge
-5. Build: `npm run build`
-6. Create GitHub release
+5. After merge on `main`, build and package:
+   - `npm run build`
+   - Zip the dist folder to `.shared/releases/` (use the build output in `.shared/extension-dist`)
+6. Create GitHub release from `main`:
+   - Use `gh release create vX.Y.Z ".shared/releases/GeminiAutoGen-vX.Y.Z.zip" --generate-notes`
+   - This command creates the tag automatically and uploads the zip asset
