@@ -21,19 +21,35 @@
 
 ## 📦 安装
 
+### 方式一：下载 Release（推荐）
+
+1. 从 [Releases](https://github.com/fangwangme/GeminiAutoGen/releases) 下载最新的 ZIP 文件
+2. 解压 ZIP 文件到任意文件夹
+3. 打开 Chrome 并进入 `chrome://extensions/`
+4. 开启 **开发者模式**（右上角开关）
+5. 点击 **加载已解压的扩展程序** 并选择解压后的文件夹
+6. 点击插件图标并选择 **打开侧边栏**
+
+### 方式二：从源码构建
+
 1. 克隆仓库：
 
-   ```bash
-   git clone https://github.com/fangwangme/GeminiAutoGen.git
-   ```
+```bash
+git clone https://github.com/fangwangme/GeminiAutoGen.git
+cd GeminiAutoGen
+```
 
-2. 打开 Chrome 并进入 `chrome://extensions/`
+2. 安装依赖并构建：
 
-3. 开启 **开发者模式**（右上角开关）
+```bash
+npm install
+npm run build
+```
 
-4. 点击 **加载已解压的扩展程序** 并选择克隆后的目录
-
-5. 点击插件图标并选择 **打开侧边栏**
+3. 打开 Chrome 并进入 `chrome://extensions/`
+4. 开启 **开发者模式**（右上角开关）
+5. 点击 **加载已解压的扩展程序** 并选择 `.shared/extension-dist` 文件夹
+6. 点击插件图标并选择 **打开侧边栏**
 
 ## ⚙️ 配置
 
@@ -49,8 +65,6 @@
    - 图片会自动重命名并移动到此处
 
 4. **语言** - 选择界面语言（English/中文）
-
-![Settings](docs/images/settings.png)
 
 ## 🚀 使用方法
 

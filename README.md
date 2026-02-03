@@ -21,19 +21,35 @@ A Chrome Extension that automates batch image generation on Google Gemini. Load 
 
 ## 📦 Installation
 
+### Option 1: Download Release (Recommended)
+
+1. Download the latest release ZIP from [Releases](https://github.com/fangwangme/GeminiAutoGen/releases)
+2. Extract the ZIP file to a folder
+3. Open Chrome and navigate to `chrome://extensions/`
+4. Enable **Developer mode** (toggle in top-right corner)
+5. Click **Load unpacked** and select the extracted folder
+6. Click the extension icon and select **Open Side Panel**
+
+### Option 2: Build from Source
+
 1. Clone this repository:
 
-   ```bash
-   git clone https://github.com/fangwangme/GeminiAutoGen.git
-   ```
+```bash
+git clone https://github.com/fangwangme/GeminiAutoGen.git
+cd GeminiAutoGen
+```
 
-2. Open Chrome and navigate to `chrome://extensions/`
+2. Install dependencies and build:
 
-3. Enable **Developer mode** (toggle in top-right corner)
+```bash
+npm install
+npm run build
+```
 
-4. Click **Load unpacked** and select the cloned folder
-
-5. Click the extension icon and select **Open Side Panel**
+3. Open Chrome and navigate to `chrome://extensions/`
+4. Enable **Developer mode** (toggle in top-right corner)
+5. Click **Load unpacked** and select the `.shared/extension-dist` folder
+6. Click the extension icon and select **Open Side Panel**
 
 ## ⚙️ Setup
 
@@ -49,8 +65,6 @@ Before using the extension, you need to configure the file directories:
    - Images will be automatically renamed and moved here
 
 4. **Language** - Choose the UI language (English/中文)
-
-![Settings](docs/images/settings.png)
 
 ## 🚀 Usage
 
