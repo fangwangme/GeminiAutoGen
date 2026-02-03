@@ -1,4 +1,13 @@
 import type { TaskItem } from "./types.js";
+import {
+  applyI18n,
+  createTranslator,
+  DEFAULT_LANGUAGE,
+  getStoredLanguage,
+  Language,
+  LANGUAGE_STORAGE_KEY,
+  normalizeLanguage
+} from "./i18n.js";
 
 const formatLogTimestamp = () => new Date().toISOString();
 const attachConsoleTimestamps = () => {
@@ -11,6 +20,46 @@ const attachConsoleTimestamps = () => {
   });
 };
 attachConsoleTimestamps();
+
+const LOG_COLLAPSED_STORAGE_KEY = "logCollapsed";
+
+let currentLanguage: Language = DEFAULT_LANGUAGE;
+let t = createTranslator(currentLanguage);
+let logPanel: HTMLDivElement | null = null;
+let logToggleBtn: HTMLButtonElement | null = null;
+let logOutputEl: HTMLDivElement | null = null;
+let logCollapsed = false;
+
+const updateLogToggleLabel = () => {
+  const label = logCollapsed
+    ? t("sidepanel.log.toggle.show")
+    : t("sidepanel.log.toggle.hide");
+  const button = logToggleBtn as HTMLButtonElement | null;
+  if (button) {
+    button.textContent = label;
+  }
+};
+
+const applyLogCollapsed = (collapsed: boolean) => {
+  logCollapsed = collapsed;
+  if (logPanel) {
+    logPanel.classList.toggle("is-collapsed", logCollapsed);
+  }
+  const output = logOutputEl as HTMLDivElement | null;
+  if (output) {
+    output.style.display = "";
+  }
+  updateLogToggleLabel();
+};
+
+const applyLanguage = (language: Language) => {
+  currentLanguage = language;
+  t = createTranslator(currentLanguage);
+  applyI18n(document, t);
+  document.title = t("sidepanel.documentTitle");
+  document.documentElement.lang = currentLanguage === "zh" ? "zh-CN" : "en";
+  updateLogToggleLabel();
+};
 
 type PanelMessage =
   | { action: "TASK_COMPLETE"; skipped?: boolean }
@@ -105,22 +154,28 @@ const validateLockedConversationUrl = (url: string) => {
   try {
     const parsed = new URL(url);
     if (!isGeminiHost(parsed.hostname)) {
-      return { ok: false, message: "Must be a Gemini URL" } as const;
+      return {
+        ok: false,
+        message: t("validation.lockedUrl.mustGemini")
+      } as const;
     }
     const normalizedPath = parsed.pathname.replace(/\/$/, "");
     const pathWithoutAccount = normalizedPath.replace(/^\/u\/\d+/, "");
     if (pathWithoutAccount === "/app") {
       return {
         ok: false,
-        message: "Must be a specific conversation URL (not /app)"
+        message: t("validation.lockedUrl.mustSpecificConversation")
       } as const;
     }
     if (!pathWithoutAccount.includes("/app/")) {
-      return { ok: false, message: "Must be a Gemini conversation URL" } as const;
+      return {
+        ok: false,
+        message: t("validation.lockedUrl.mustConversation")
+      } as const;
     }
     return { ok: true } as const;
   } catch {
-    return { ok: false, message: "Invalid URL" } as const;
+    return { ok: false, message: t("validation.lockedUrl.invalid") } as const;
   }
 };
 
@@ -180,6 +235,27 @@ document.addEventListener("DOMContentLoaded", async () => {
   const logOutput = document.getElementById("logOutput") as HTMLDivElement;
   const logCopyBtn = document.getElementById("logCopyBtn") as HTMLButtonElement;
   const logClearBtn = document.getElementById("logClearBtn") as HTMLButtonElement;
+  logPanel = document.querySelector(".log-panel") as HTMLDivElement;
+  logToggleBtn = document.getElementById("logToggleBtn") as HTMLButtonElement;
+  logOutputEl = logOutput;
+
+  const initLanguage = async () => {
+    const storedLanguage = await getStoredLanguage();
+    applyLanguage(storedLanguage);
+  };
+
+  await initLanguage();
+
+  statusText.textContent = t("sidepanel.status.ready");
+  fileInfo.textContent = t("sidepanel.file.noFile");
+  urlStatus.textContent = t("sidepanel.lockedUrl.none");
+
+  const logState = await storageGet<{ logCollapsed?: boolean }>([
+    LOG_COLLAPSED_STORAGE_KEY
+  ]);
+  logCollapsed =
+    typeof logState.logCollapsed === "boolean" ? logState.logCollapsed : true;
+  applyLogCollapsed(logCollapsed);
 
   // State
   let loadedTasks: TaskItem[] = [];
@@ -198,11 +274,40 @@ document.addEventListener("DOMContentLoaded", async () => {
   let consecutiveFailureCount = 0;
   let nextTaskMode: TaskRunMode = "full";
 
+  const refreshDynamicLabels = () => {
+    if (loadedTasks.length > 0) {
+      fileInfo.textContent = t("sidepanel.status.loadedTasks", {
+        count: loadedTasks.length
+      });
+      fileInfo.style.color = "var(--success)";
+    } else {
+      fileInfo.textContent = t("sidepanel.file.noFile");
+      fileInfo.style.color = "var(--muted)";
+    }
+
+    if (!lockedConversationUrl) {
+      urlStatus.textContent = t("sidepanel.lockedUrl.none");
+      urlStatus.style.color = "var(--muted)";
+      return;
+    }
+
+    const validation = validateLockedConversationUrl(lockedConversationUrl);
+    if (validation.ok) {
+      urlStatus.textContent = t("sidepanel.status.urlLocked");
+      urlStatus.style.color = "var(--success)";
+    } else {
+      urlStatus.textContent = t("sidepanel.status.validationError", {
+        reason: validation.message
+      });
+      urlStatus.style.color = "var(--danger)";
+    }
+  };
+
   const formatDuration = (ms: number) => {
     const totalSeconds = Math.max(0, Math.floor(ms / 1000));
     const minutes = Math.floor(totalSeconds / 60);
     const seconds = totalSeconds % 60;
-    return `${minutes}m ${seconds}s`;
+    return t("time.short", { minutes, seconds });
   };
 
   const clearLogOutput = () => {
@@ -256,7 +361,7 @@ document.addEventListener("DOMContentLoaded", async () => {
           await navigator.clipboard.writeText(nameWithoutExt);
           // Brief visual feedback
           const original = currentFileNameEl.textContent;
-          currentFileNameEl.textContent = "✓ Copied!";
+          currentFileNameEl.textContent = t("sidepanel.currentFile.copied");
           setTimeout(() => {
             currentFileNameEl.textContent = original;
           }, 800);
@@ -286,6 +391,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
+  if (logToggleBtn) {
+    logToggleBtn.addEventListener("click", async () => {
+      applyLogCollapsed(!logCollapsed);
+      await storageSet({ [LOG_COLLAPSED_STORAGE_KEY]: logCollapsed });
+    });
+  }
+
   // Load saved locked URL
   const urlData = await storageGet<{ lockedConversationUrl?: string }>([
     "lockedConversationUrl"
@@ -296,11 +408,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     conversationUrlInput.value = candidate;
     if (validation.ok) {
       lockedConversationUrl = candidate;
-      urlStatus.textContent = "✅ URL locked - will use this conversation";
+      urlStatus.textContent = t("sidepanel.status.urlLocked");
       urlStatus.style.color = "var(--success)";
     } else {
       lockedConversationUrl = "";
-      urlStatus.textContent = `❌ ${validation.message}`;
+      urlStatus.textContent = t("sidepanel.status.validationError", {
+        reason: validation.message
+      });
       urlStatus.style.color = "var(--danger)";
     }
   }
@@ -309,7 +423,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   const data = await storageGet<{ loadedTasks?: TaskItem[] }>(["loadedTasks"]);
   if (data.loadedTasks) {
     loadedTasks = data.loadedTasks;
-    fileInfo.textContent = `Loaded ${loadedTasks.length} tasks`;
+    fileInfo.textContent = t("sidepanel.status.loadedTasks", {
+      count: loadedTasks.length
+    });
     fileInfo.style.color = "var(--success)";
   }
 
@@ -319,24 +435,26 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (!conversationUrlInput || !urlStatus) return;
       const url = conversationUrlInput.value.trim();
       if (!url) {
-        urlStatus.textContent = "❌ Please enter a URL";
+        urlStatus.textContent = t("sidepanel.status.urlEnter");
         urlStatus.style.color = "var(--danger)";
         return;
       }
       const validation = validateLockedConversationUrl(url);
       if (!validation.ok) {
-        urlStatus.textContent = `❌ ${validation.message}`;
+        urlStatus.textContent = t("sidepanel.status.validationError", {
+          reason: validation.message
+        });
         urlStatus.style.color = "var(--danger)";
         return;
       }
       lockedConversationUrl = url;
       try {
         await storageSet({ lockedConversationUrl: url });
-        urlStatus.textContent = "✅ URL locked - will use this conversation";
+        urlStatus.textContent = t("sidepanel.status.urlLocked");
         urlStatus.style.color = "var(--success)";
         console.log(`[Panel] Locked conversation URL: ${url}`);
       } catch (err) {
-        urlStatus.textContent = "❌ Failed to save URL";
+        urlStatus.textContent = t("sidepanel.status.urlSaveFailed");
         urlStatus.style.color = "var(--danger)";
         console.error("[Panel] Failed to lock URL:", err);
       }
@@ -353,11 +471,11 @@ document.addEventListener("DOMContentLoaded", async () => {
       conversationUrlInput.value = "";
       try {
         await storageRemove("lockedConversationUrl");
-        urlStatus.textContent = "No URL locked";
+        urlStatus.textContent = t("sidepanel.lockedUrl.none");
         urlStatus.style.color = "var(--muted)";
         console.log("[Panel] Conversation URL lock cleared");
       } catch (err) {
-        urlStatus.textContent = "❌ Failed to clear URL";
+        urlStatus.textContent = t("sidepanel.status.urlClearFailed");
         urlStatus.style.color = "var(--danger)";
         console.error("[Panel] Failed to clear URL:", err);
       }
@@ -372,7 +490,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const file = target?.files?.[0];
     if (!file) {
       loadedTasks = [];
-      fileInfo.textContent = "No file loaded";
+      fileInfo.textContent = t("sidepanel.file.noFile");
       fileInfo.style.color = "var(--muted)";
       return;
     }
@@ -385,14 +503,16 @@ document.addEventListener("DOMContentLoaded", async () => {
         const json = JSON.parse(rawText) as unknown;
         if (Array.isArray(json)) {
           loadedTasks = json as TaskItem[];
-          fileInfo.textContent = `Loaded ${json.length} tasks`;
+          fileInfo.textContent = t("sidepanel.status.loadedTasks", {
+            count: json.length
+          });
           fileInfo.style.color = "var(--success)";
           void storageSet({ loadedTasks: json });
         } else {
           throw new Error("File must contain an array");
         }
       } catch {
-        fileInfo.textContent = "Error: Invalid JSON";
+        fileInfo.textContent = t("sidepanel.status.errorInvalidJson");
         fileInfo.style.color = "var(--danger)";
         loadedTasks = [];
       }
@@ -407,20 +527,22 @@ document.addEventListener("DOMContentLoaded", async () => {
     ]);
     const lockedCandidate = storedUrl.lockedConversationUrl?.trim() || "";
     if (!lockedCandidate) {
-      statusText.textContent = "Please lock a conversation URL first";
+      statusText.textContent = t("sidepanel.status.lockUrlFirst");
       statusText.style.color = "var(--danger)";
       return;
     }
     const lockedValidation = validateLockedConversationUrl(lockedCandidate);
     if (!lockedValidation.ok) {
-      statusText.textContent = `Locked URL invalid: ${lockedValidation.message}`;
+      statusText.textContent = t("sidepanel.status.lockedUrlInvalid", {
+        reason: lockedValidation.message
+      });
       statusText.style.color = "var(--danger)";
       return;
     }
     lockedConversationUrl = lockedCandidate;
 
     if (loadedTasks.length === 0) {
-      statusText.textContent = "Please upload a JSON file";
+      statusText.textContent = t("sidepanel.status.uploadJson");
       statusText.style.color = "var(--danger)";
       return;
     }
@@ -459,13 +581,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     if (!currentTabId) {
-      statusText.textContent = "Failed to open Gemini tab";
+      statusText.textContent = t("sidepanel.status.failedToOpenTab");
       statusText.style.color = "var(--danger)";
       return;
     }
 
     // Pre-scan for existing files
-    statusText.textContent = "Checking existing files...";
+    statusText.textContent = t("sidepanel.status.checkingExisting");
     let existingFiles = new Set<string>();
     try {
       const response = await runtimeSendMessage<ListFilesResponse>({
@@ -495,11 +617,13 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     const skipped = loadedTasks.length - taskQueue.length;
     if (skipped > 0) {
-      statusText.textContent = `Skipped ${skipped} existing files`;
+      statusText.textContent = t("sidepanel.status.skippedExisting", {
+        count: skipped
+      });
     }
 
     if (taskQueue.length === 0) {
-      statusText.textContent = "All tasks completed!";
+      statusText.textContent = t("sidepanel.status.allTasksCompleted");
       statusText.style.color = "var(--success)";
       return;
     }
@@ -531,7 +655,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     nextTaskMode = "full";
     stopTimer();
     updateUI(false);
-    statusText.textContent = "Stopped by user";
+    statusText.textContent = t("sidepanel.status.stoppedByUser");
     statusText.style.color = "var(--danger)";
   });
 
@@ -557,13 +681,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     await runtimeSendMessage<void>({ action: "RESET_STATE" });
 
     // Reset UI
-    fileInfo.textContent = "No file loaded";
+    fileInfo.textContent = t("sidepanel.file.noFile");
     fileInfo.style.color = "var(--muted)";
     progressBar.style.width = "0%";
     progressText.textContent = "0/0";
-    elapsedTimeElement.textContent = "0m 0s";
-    remainingTimeElement.textContent = "--m --s";
-    statusText.textContent = "Reset complete - Load new tasks to start";
+    elapsedTimeElement.textContent = t("time.short", { minutes: 0, seconds: 0 });
+    remainingTimeElement.textContent = t("time.unknown");
+    statusText.textContent = t("sidepanel.status.resetComplete");
     statusText.style.color = "var(--success)";
     currentFileNameEl.textContent = "";
     jsonFileInput.value = "";
@@ -578,11 +702,13 @@ document.addEventListener("DOMContentLoaded", async () => {
       conversationUrlInput.value = candidate;
       if (validation.ok) {
         lockedConversationUrl = candidate;
-        urlStatus.textContent = "✅ URL locked - will use this conversation";
+        urlStatus.textContent = t("sidepanel.status.urlLocked");
         urlStatus.style.color = "var(--success)";
       } else {
         lockedConversationUrl = "";
-        urlStatus.textContent = `❌ ${validation.message}`;
+        urlStatus.textContent = t("sidepanel.status.validationError", {
+          reason: validation.message
+        });
         urlStatus.style.color = "var(--danger)";
       }
     }
@@ -600,7 +726,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       isRunning = false;
       stopTimer();
       updateUI(false);
-      statusText.textContent = "All Tasks Completed!";
+      statusText.textContent = t("sidepanel.status.allTasksCompleted");
       statusText.style.color = "var(--success)";
       progressBar.style.width = "100%";
       currentFileNameEl.textContent = "";
@@ -608,13 +734,37 @@ document.addEventListener("DOMContentLoaded", async () => {
       const totalTasks = taskQueue.length;
       const completedCount = Math.max(totalTasks - skippedCount - failedCount, 0);
       const averageMs = totalTasks > 0 ? Math.round(elapsedMs / totalTasks) : 0;
-      appendLogLine("--- Summary ---");
-      appendLogLine(`Total tasks: ${totalTasks}`);
-      appendLogLine(`Completed: ${completedCount}`);
-      appendLogLine(`Skipped: ${skippedCount}`);
-      appendLogLine(`Failed: ${failedCount}`);
-      appendLogLine(`Total time: ${formatDuration(elapsedMs)}`);
-      appendLogLine(`Avg per task: ${formatDuration(averageMs)}`);
+      appendLogLine(t("sidepanel.log.summaryTitle"));
+      appendLogLine(
+        t("sidepanel.log.summary.total", {
+          count: totalTasks
+        })
+      );
+      appendLogLine(
+        t("sidepanel.log.summary.completed", {
+          count: completedCount
+        })
+      );
+      appendLogLine(
+        t("sidepanel.log.summary.skipped", {
+          count: skippedCount
+        })
+      );
+      appendLogLine(
+        t("sidepanel.log.summary.failed", {
+          count: failedCount
+        })
+      );
+      appendLogLine(
+        t("sidepanel.log.summary.totalTime", {
+          time: formatDuration(elapsedMs)
+        })
+      );
+      appendLogLine(
+        t("sidepanel.log.summary.avgPerTask", {
+          time: formatDuration(averageMs)
+        })
+      );
       return;
     }
 
@@ -637,18 +787,25 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     // Update progress
-    progressText.textContent = `Task ${currentIndex + 1} of ${total}`;
+    progressText.textContent = t("sidepanel.status.taskProgress", {
+      current: currentIndex + 1,
+      total
+    });
     progressBar.style.width = `${((currentIndex + 1) / total) * 100}%`;
     statusText.textContent =
-      taskMode === "download-only" ? "Retrying download..." : "Generating...";
+      taskMode === "download-only"
+        ? t("sidepanel.status.retryingDownload")
+        : t("sidepanel.status.generating");
     statusText.style.color = "var(--text)";
-    currentFileNameEl.textContent = `📷 ${displayName}`;
+    currentFileNameEl.textContent = t("sidepanel.currentFile", {
+      name: displayName
+    });
 
     // Save current task to storage
     await storageSet({ currentTask: task, currentTaskMode: taskMode });
 
     if (!currentTabId) {
-      statusText.textContent = "Error: No active Gemini tab";
+      statusText.textContent = t("sidepanel.status.noActiveTab");
       statusText.style.color = "var(--danger)";
       isRunning = false;
       updateUI(false);
@@ -664,7 +821,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       });
     } catch (err) {
       console.error("[Panel] Injection failed:", err);
-      statusText.textContent = "Error: Please refresh Gemini page";
+      statusText.textContent = t("sidepanel.status.refreshGemini");
       statusText.style.color = "var(--danger)";
       isRunning = false;
       updateUI(false);
@@ -693,7 +850,7 @@ document.addEventListener("DOMContentLoaded", async () => {
           : "generation");
 
     if (resolvedErrorType === "locked-url") {
-      statusText.textContent = error || "Locked URL error";
+      statusText.textContent = error || t("sidepanel.status.lockedUrlError");
       statusText.style.color = "var(--danger)";
       appendLogLine(`Locked URL error - stopped: ${error}`);
       isRunning = false;
@@ -716,7 +873,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     if (resolvedErrorType === "folder") {
-      statusText.textContent = `Folder access error: ${error}`;
+      statusText.textContent = t("sidepanel.status.folderAccessError", {
+        error
+      });
       statusText.style.color = "var(--danger)";
       appendLogLine(`Folder access error - stopped: ${error}`);
       isRunning = false;
@@ -731,8 +890,14 @@ document.addEventListener("DOMContentLoaded", async () => {
       const nextRetry = currentRetries + 1;
       retryCounts.set(currentIndex, nextRetry);
       const retryLabel =
-        resolvedErrorType === "download" ? "Retrying download" : "Retrying";
-      statusText.textContent = `${retryLabel} (${nextRetry}/${maxRetries})...`;
+        resolvedErrorType === "download"
+          ? t("sidepanel.status.retryingDownloadShort")
+          : t("sidepanel.status.retrying");
+      statusText.textContent = t("sidepanel.status.retryingWithCount", {
+        label: retryLabel,
+        current: nextRetry,
+        max: maxRetries
+      });
       statusText.style.color = "var(--warning)";
       if (resolvedErrorType === "download") {
         nextTaskMode = "download-only";
@@ -748,12 +913,14 @@ document.addEventListener("DOMContentLoaded", async () => {
     failedCount += 1;
     consecutiveFailureCount += 1;
     appendLogLine(`Failed task ${currentIndex + 1} (${resolvedErrorType}): ${error}`);
-    statusText.textContent = `Failed: ${error}`;
+    statusText.textContent = t("sidepanel.status.failed", { error });
     statusText.style.color = "var(--danger)";
 
     if (maxConsecutiveFailures > 0 && consecutiveFailureCount >= maxConsecutiveFailures) {
-      statusText.textContent =
-        `Stopped after ${consecutiveFailureCount} consecutive failures. Last: ${error}`;
+      statusText.textContent = t("sidepanel.status.stoppedAfterFailures", {
+        count: consecutiveFailureCount,
+        error
+      });
       statusText.style.color = "var(--danger)";
       isRunning = false;
       stopTimer();
@@ -823,7 +990,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Recreate tab: close old tab, open new one
   async function recreateTab() {
     console.log("[Panel] Recreating tab...");
-    statusText.textContent = "Resetting browser context...";
+    statusText.textContent = t("sidepanel.status.resettingBrowserContext");
 
     // Get Settings
     const settings = await storageGet<{
@@ -854,7 +1021,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     currentTabId = newTab.id ?? null;
 
     if (!currentTabId) {
-      statusText.textContent = "Error: Could not create Gemini tab";
+      statusText.textContent = t("sidepanel.status.errorCreateTab");
       statusText.style.color = "var(--danger)";
       isRunning = false;
       updateUI(false);
@@ -925,7 +1092,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       console.warn(
         `[Panel] Locked URL mismatch (${reason}). Expected ${lockedConversationUrl}, got ${currentUrl}`
       );
-      statusText.textContent = "Locked URL mismatch - reopening...";
+      statusText.textContent = t("sidepanel.status.lockedUrlMismatch");
       statusText.style.color = "var(--warning)";
 
       if (currentTabId) {
@@ -940,7 +1107,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       currentTabId = freshTab.id ?? null;
 
       if (!currentTabId) {
-        statusText.textContent = "Error: Could not create Gemini tab";
+        statusText.textContent = t("sidepanel.status.errorCreateTab");
         statusText.style.color = "var(--danger)";
         isRunning = false;
         updateUI(false);
@@ -967,7 +1134,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   function formatTime(seconds: number) {
     const m = Math.floor(seconds / 60);
     const s = seconds % 60;
-    return `${m}m ${s}s`;
+    return t("time.short", { minutes: m, seconds: s });
   }
 
   function startTimer() {
@@ -1000,14 +1167,34 @@ document.addEventListener("DOMContentLoaded", async () => {
       const remainingTasks = totalTasks - completedTasks;
       const remainingSeconds = Math.floor(avgSecondsPerTask * remainingTasks);
       const avgSeconds = Math.round(avgSecondsPerTask);
-      remainingTimeElement.textContent = `${formatTime(
-        remainingSeconds
-      )} (avg ${avgSeconds}s)`;
+      remainingTimeElement.textContent = t("time.remainingWithAvg", {
+        remaining: formatTime(remainingSeconds),
+        avg: avgSeconds
+      });
     } else if (totalTasks === completedTasks && totalTasks > 0) {
       const avgSeconds = Math.round(elapsedSeconds / totalTasks);
-      remainingTimeElement.textContent = `0m 0s (avg ${avgSeconds}s)`;
+      remainingTimeElement.textContent = t("time.remainingWithAvg", {
+        remaining: formatTime(0),
+        avg: avgSeconds
+      });
     } else {
-      remainingTimeElement.textContent = "--m --s";
+      remainingTimeElement.textContent = t("time.unknown");
     }
   }
+
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local") return;
+    if (changes[LANGUAGE_STORAGE_KEY]) {
+      const nextLanguage = normalizeLanguage(
+        changes[LANGUAGE_STORAGE_KEY].newValue as string | undefined
+      );
+      if (nextLanguage !== currentLanguage) {
+        applyLanguage(nextLanguage);
+        refreshDynamicLabels();
+      }
+    }
+    if (changes[LOG_COLLAPSED_STORAGE_KEY]) {
+      applyLogCollapsed(Boolean(changes[LOG_COLLAPSED_STORAGE_KEY].newValue));
+    }
+  });
 });
