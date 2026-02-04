@@ -673,8 +673,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     currentTabId = null;
     retryCounts.clear();
     skippedCount = 0;
+    lockedConversationUrl = ""; // Clear locked URL from memory
 
-    // Clear storage
+    // Clear storage (includes lockedConversationUrl)
     await storageClear();
 
     // Reset background state
@@ -692,29 +693,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     currentFileNameEl.textContent = "";
     jsonFileInput.value = "";
 
-    // Restore locked URL if still set
-    const savedUrl = await storageGet<{ lockedConversationUrl?: string }>([
-      "lockedConversationUrl"
-    ]);
-    if (savedUrl.lockedConversationUrl) {
-      const candidate = savedUrl.lockedConversationUrl.trim();
-      const validation = validateLockedConversationUrl(candidate);
-      conversationUrlInput.value = candidate;
-      if (validation.ok) {
-        lockedConversationUrl = candidate;
-        urlStatus.textContent = t("sidepanel.status.urlLocked");
-        urlStatus.style.color = "var(--success)";
-      } else {
-        lockedConversationUrl = "";
-        urlStatus.textContent = t("sidepanel.status.validationError", {
-          reason: validation.message
-        });
-        urlStatus.style.color = "var(--danger)";
-      }
-    }
+    // Clear locked URL UI
+    conversationUrlInput.value = "";
+    urlStatus.textContent = "";
 
     updateUI(false);
-    console.log("[Panel] Reset complete");
+    console.log("[Panel] Reset complete (including locked URL)");
   });
 
   // Process next task
