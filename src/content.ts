@@ -383,40 +383,6 @@ const logError = (message: string, data?: unknown) =>
     };
   }
 
-  function describeButton(button: HTMLButtonElement) {
-    const style = window.getComputedStyle(button);
-    return {
-      label:
-        button.getAttribute("aria-label") ||
-        button.getAttribute("mattooltip") ||
-        button.textContent?.trim() ||
-        "(no-label)",
-      disabled: button.disabled,
-      ariaDisabled: button.getAttribute("aria-disabled"),
-      className: button.className,
-      display: style.display,
-      visibility: style.visibility,
-      opacity: style.opacity,
-      pointerEvents: style.pointerEvents
-    };
-  }
-
-  function describeImage(img: HTMLImageElement) {
-    const style = window.getComputedStyle(img);
-    const rawSrc = img.currentSrc || img.src || "";
-    return {
-      src: rawSrc.length > 160 ? `${rawSrc.slice(0, 157)}...` : rawSrc,
-      complete: img.complete,
-      naturalWidth: img.naturalWidth,
-      naturalHeight: img.naturalHeight,
-      width: img.width,
-      height: img.height,
-      display: style.display,
-      visibility: style.visibility,
-      opacity: style.opacity
-    };
-  }
-
   function getImageSrc(img: HTMLImageElement) {
     return img.currentSrc || img.src || "";
   }
@@ -651,9 +617,6 @@ const logError = (message: string, data?: unknown) =>
     for (let attempt = 0; attempt < 4; attempt++) {
       const menuItem = getDownloadMenuItem();
       if (menuItem && isVisible(menuItem)) {
-        logInfo("[Content] Download menu item detected", {
-          label: getDownloadMenuItemLabel(menuItem)
-        });
         menuItem.click();
         return true;
       }
@@ -993,8 +956,10 @@ const logError = (message: string, data?: unknown) =>
     composedPrompt: string,
     promptAnchorText: string
   ) {
-    logInfo("[Content] Download-only mode: locating existing response", {
-      filename
+    logInfo(`[Content] Download-only mode: ${filename}`);
+    logInfo("[Content] Waiting for existing response", {
+      timeoutMs: CONFIG_GEN_TIMEOUT,
+      pollMs: CONFIG_POLL
     });
     updateStatus(t("content.status.retryingDownload"));
 
@@ -1028,21 +993,9 @@ const logError = (message: string, data?: unknown) =>
         pollTick += 1;
         if (!responseContainer || !responseContainer.isConnected) return false;
         const responseState = getResponseReadyState(responseContainer);
-        if (!responseState.ready) {
-          if (pollTick % 5 === 0) {
-            logInfo("[Content] Waiting for response ready (download-only)", responseState);
-          }
-          return false;
-        }
+        if (!responseState.ready) return false;
         const buttons = getDownloadButtonsInContainer(responseContainer, true);
         const loadedImages = getLoadedImagesInContainer(responseContainer);
-        if (pollTick % 5 === 0) {
-          logInfo("[Content] Download-only scan", {
-            buttons: buttons.length,
-            loadedImages: loadedImages.length,
-            responseClass: responseContainer.className || "(none)"
-          });
-        }
         return buttons.length > 0 && loadedImages.length > 0;
       },
       CONFIG_GEN_TIMEOUT,
@@ -1070,11 +1023,6 @@ const logError = (message: string, data?: unknown) =>
 
     if (responseContainer) {
       targetBtn = getDownloadButtonInConversation(responseContainer);
-      if (targetBtn) {
-        logInfo("[Content] Found download button via getDownloadButtonInConversation", {
-          button: describeButton(targetBtn)
-        });
-      }
     }
 
     if (!targetBtn) {
@@ -1083,25 +1031,11 @@ const logError = (message: string, data?: unknown) =>
         : responseContainer
           ? getDownloadButtonsInContainer(responseContainer, true)
           : [];
-      logInfo("[Content] Download buttons in response", {
-        count: downloadBtns.length,
-        buttons: downloadBtns.map(describeButton)
-      });
       if (!downloadBtns.length) {
         const fallbackButtons = responseContainer
           ? getDownloadButtonsInContainer(responseContainer, true)
           : [];
-        logInfo("[Content] Download buttons including hidden", {
-          count: fallbackButtons.length,
-          buttons: fallbackButtons.map(describeButton)
-        });
         downloadBtns = fallbackButtons;
-      }
-      if (!downloadBtns.length) {
-        logInfo("[Content] All download buttons on page", {
-          count: getDownloadBtns(true).length,
-          buttons: getDownloadBtns(true).map(describeButton)
-        });
       }
 
       const nearestButton = getDownloadButtonForImage(
@@ -1126,10 +1060,7 @@ const logError = (message: string, data?: unknown) =>
       throw new TaskError(t("content.error.noDownloadButton"), "generation");
     }
 
-    logInfo("[Content] Clicking download", {
-      filename,
-      button: describeButton(targetBtn)
-    });
+    logInfo(`[Content] Clicking download: ${filename}`);
 
     for (let revealAttempt = 0; revealAttempt < 3; revealAttempt++) {
       revealDownloadButton(targetBtn);
@@ -1137,15 +1068,10 @@ const logError = (message: string, data?: unknown) =>
       if (isClickable(targetBtn)) {
         break;
       }
-      logInfo(
-        `[Content] Download button not clickable yet, attempt ${revealAttempt + 1}`
-      );
     }
 
     if (!isClickable(targetBtn)) {
-      logWarn(
-        "[Content] Download button still not clickable after multiple reveals, trying anyway"
-      );
+      logWarn("[Content] Download button not clickable, trying anyway");
     }
 
     clickDownloadButton(targetBtn);
@@ -1284,15 +1210,17 @@ const logError = (message: string, data?: unknown) =>
     }
 
     // 4. Wait for Gemini page to be fully ready (not just input field)
-    logInfo("[Content] Waiting for Gemini page to be ready...");
+    logInfo("[Content] Waiting for page ready", {
+      timeoutMs: CONFIG_INPUT_TIMEOUT,
+      pollMs: CONFIG_POLL
+    });
     let inputField: HTMLElement | null = null;
     const inputWaitStart = Date.now();
     let lastInputWaitLog = 0;
     const logPageReadyState = () => {
-      const pageState = isGeminiPageReady();
       logInfo("[Content] Page not ready yet", {
         elapsedMs: Date.now() - inputWaitStart,
-        ...pageState.details
+        timeoutMs: CONFIG_INPUT_TIMEOUT
       });
     };
 
@@ -1318,15 +1246,12 @@ const logError = (message: string, data?: unknown) =>
     } catch (err) {
       logError("[Content] Page ready wait timed out", {
         elapsedMs: Date.now() - inputWaitStart,
-        finalState: isGeminiPageReady().details
+        timeoutMs: CONFIG_INPUT_TIMEOUT
       });
       throw err;
     }
 
-    logInfo("[Content] Gemini page ready", {
-      elapsedMs: Date.now() - inputWaitStart,
-      ...isGeminiPageReady().details
-    });
+    logInfo("[Content] Page ready", { elapsedMs: Date.now() - inputWaitStart });
 
     if (!inputField) {
       throw new Error(t("content.error.inputFieldNotFound"));
@@ -1334,11 +1259,8 @@ const logError = (message: string, data?: unknown) =>
     const initialInputField = inputField as HTMLElement;
 
     // 4.5 Wait for page to stabilize (previous images fully loaded)
-    logInfo("[Content] Waiting for previous images to load...");
-    logInfo("[Content] Page stability settings", {
+    logInfo("[Content] Checking page stability", {
       timeoutMs: CONFIG_STABILITY_TIMEOUT,
-      graceMs: CONFIG_STABILITY_GRACE,
-      pollMs: CONFIG_POLL,
       stepDelayMs: CONFIG_STEP_DELAY
     });
 
@@ -1381,13 +1303,7 @@ const logError = (message: string, data?: unknown) =>
         allLoaded ||
         (hasButtons && Date.now() - stabilityStart > CONFIG_STABILITY_GRACE)
       ) {
-        logInfo(
-          "[Content] Page stable",
-          {
-            images: images.length,
-            downloadButtons: btns.length
-          }
-        );
+        logInfo("[Content] Page stable");
         break;
       }
 
@@ -1397,17 +1313,21 @@ const logError = (message: string, data?: unknown) =>
         btns.length === 0 &&
         Date.now() - stabilityStart > CONFIG_STABILITY_GRACE
       ) {
-        logInfo("[Content] No existing images - proceeding with new conversation");
+        logInfo("[Content] No existing images, proceeding");
         break;
       }
     }
 
     // Extra safety wait before starting task
-    logInfo("[Content] Waiting safety delay...");
+    logInfo("[Content] Waiting safety delay", {
+      sleepMs: CONFIG_STEP_DELAY * 3
+    });
     await wait(CONFIG_STEP_DELAY * 3);
 
     // 5. Scroll to bottom and prepare
-    logInfo("[Content] Scrolling to bottom...");
+    logInfo("[Content] Scrolling to bottom", {
+      sleepMs: CONFIG_STEP_DELAY
+    });
     await scrollToBottom();
     await wait(CONFIG_STEP_DELAY); // Wait after scroll
 
@@ -1436,10 +1356,14 @@ const logError = (message: string, data?: unknown) =>
     }
 
     // Wait 1 second before clicking send
+    logInfo("[Content] Sleep before send", { sleepMs: CONFIG_STEP_DELAY });
     await wait(CONFIG_STEP_DELAY);
 
     // 6. Click Send
-    logInfo("[Content] Waiting for Send button...");
+    logInfo("[Content] Waiting for Send button", {
+      timeoutMs: CONFIG_SEND_TIMEOUT,
+      pollMs: CONFIG_POLL
+    });
     let sendBtn: HTMLButtonElement | null = null;
     await waitFor(
       () => {
@@ -1488,27 +1412,19 @@ const logError = (message: string, data?: unknown) =>
       ? containersBeforeSend[containersBeforeSend.length - 1]
       : null;
     const lastContainerIdBeforeSend = lastContainerBeforeSend?.id || null;
-    
-    logInfo("[Content] Container state before send", {
-      containerCount: containersBeforeSend.length,
-      lastContainerId: lastContainerIdBeforeSend || "(none)",
-      lastContainerClass: lastContainerBeforeSend?.className.slice(0, 50) || "(none)"
-    });
 
     await wait(CONFIG_STEP_DELAY / 2);
     sendButton.focus({ preventScroll: true });
     sendButton.click();
-    logInfo("[Content] Prompt sent.");
+    logInfo("[Content] Prompt sent");
 
+    logInfo("[Content] Sleep after send", { sleepMs: CONFIG_STEP_DELAY });
     await wait(CONFIG_STEP_DELAY);
 
     // CRITICAL: Verify URL hasn't changed after sending (Gemini might auto-create new conversation)
     const urlAfterSend = window.location.href;
     if (!urlsMatch(lockedConversationUrl, urlAfterSend)) {
-      logError("[Content] URL changed after sending prompt!", {
-        expected: lockedConversationUrl,
-        actual: urlAfterSend
-      });
+      logError("[Content] URL changed after sending prompt");
       throw new TaskError(
         t("content.error.lockedUrlMismatch", {
           expected: lockedConversationUrl,
@@ -1518,6 +1434,10 @@ const logError = (message: string, data?: unknown) =>
       );
     }
 
+    logInfo("[Content] Waiting for input to clear", {
+      timeoutMs: CONFIG_INPUT_TIMEOUT,
+      pollMs: CONFIG_POLL
+    });
     await waitFor(
       () => {
         const field = findInputField();
@@ -1541,6 +1461,10 @@ const logError = (message: string, data?: unknown) =>
 
     let latestUserQuery: Element | null = null;
     try {
+      logInfo("[Content] Waiting for prompt render", {
+        timeoutMs: CONFIG_INPUT_TIMEOUT,
+        pollMs: CONFIG_POLL
+      });
       await waitFor(
         () => {
           const candidate = getLatestUserQueryAfter();
@@ -1553,12 +1477,18 @@ const logError = (message: string, data?: unknown) =>
         t("content.error.timeoutPromptRender")
       );
     } catch {
-      logWarn("[Content] Prompt render wait timed out");
+      logWarn("[Content] Prompt render wait timed out", {
+        timeoutMs: CONFIG_INPUT_TIMEOUT
+      });
     }
 
     let latestConversationContainer: HTMLElement | null = null;
     let hasNewConversationContainer = false;
     try {
+      logInfo("[Content] Waiting for conversation container", {
+        timeoutMs: CONFIG_INPUT_TIMEOUT,
+        pollMs: CONFIG_POLL
+      });
       await waitFor(
         () => {
           const containers = document.querySelectorAll(".conversation-container");
@@ -1580,12 +1510,14 @@ const logError = (message: string, data?: unknown) =>
         latestConversationContainer =
           containers[containers.length - 1] as HTMLElement;
         hasNewConversationContainer = true;
-        logWarn(
-          "[Content] Conversation container wait timed out, but new container found"
-        );
+        logWarn("[Content] Conversation container wait timed out", {
+          timeoutMs: CONFIG_INPUT_TIMEOUT
+        });
       } else {
         latestConversationContainer = null;
-        logWarn("[Content] Conversation container wait timed out");
+        logWarn("[Content] Conversation container wait timed out", {
+          timeoutMs: CONFIG_INPUT_TIMEOUT
+        });
       }
     }
 
@@ -1605,17 +1537,8 @@ const logError = (message: string, data?: unknown) =>
         Node.DOCUMENT_POSITION_FOLLOWING
       )
     ) {
-      logWarn("[Content] Prompt anchor not after last user query; ignoring", {
-        text: promptAnchor.textContent?.trim().slice(0, 120) || "(none)"
-      });
       promptAnchor = null;
     }
-    logInfo("[Content] Prompt anchor found", {
-      found: Boolean(promptAnchor),
-      text: promptAnchor?.textContent?.trim().slice(0, 120) || "(none)",
-      userQueryCount: document.querySelectorAll("user-query").length,
-      hasNewConversationContainer
-    });
     if (!promptAnchor) {
       throw new Error(t("content.error.promptAnchorNotFound"));
     }
@@ -1623,23 +1546,13 @@ const logError = (message: string, data?: unknown) =>
     const resolveResponseContainer = () => {
       return promptAnchor ? getResponseContainerForAnchor(promptAnchor) : null;
     };
-    logInfo("[Content] Response container found", {
-      found: Boolean(responseContainer),
-      className: responseContainer?.className || "(none)"
-    });
-    if (!responseContainer) {
-      logWarn("[Content] Response container not available yet");
-    }
 
     // 7. Wait for generation
-    updateStatus(t("content.status.generating"));
-
-    // CRITICAL: Record counts BEFORE sending prompt
-    // This prevents detecting old buttons/images from previous responses
-    logInfo("[Content] Initial counts before prompt", {
-      globalButtons: initialGlobalDownloadBtnCount,
-      globalImages: initialGlobalImageCount
+    logInfo("[Content] Waiting for generation", {
+      timeoutMs: CONFIG_GEN_TIMEOUT,
+      pollMs: CONFIG_POLL
     });
+    updateStatus(t("content.status.generating"));
 
     let pollTick = 0;
     let latestDownloadButtons: HTMLButtonElement[] = [];
@@ -1670,29 +1583,12 @@ const logError = (message: string, data?: unknown) =>
                 // Confirm this is our new container
                 if (confirmedNewContainerId && confirmedNewContainerId !== matchId) {
                   // Container ID changed again - reset baseline
-                  logWarn("[Content] Container ID changed mid-poll", {
-                    oldId: confirmedNewContainerId,
-                    newId: matchId
-                  });
                   responseBaselineSrcs = new Set<string>();
                   baselineReady = false;
                 }
                 
-                if (!confirmedNewContainerId) {
-                  logInfo("[Content] Found NEW conversation container", {
-                    containerId: matchId,
-                    lastContainerIdBeforeSend: lastContainerIdBeforeSend || "(none)",
-                    containerClass: match.container.className.slice(0, 50)
-                  });
-                }
-                
                 confirmedNewContainerId = matchId;
                 conversationMatch = match;
-              } else if (!isNewContainer && pollTick % 10 === 0) {
-                logInfo("[Content] Found container but it's the OLD one, waiting for new", {
-                  matchId,
-                  lastContainerIdBeforeSend
-                });
               }
             }
           }
@@ -1718,12 +1614,6 @@ const logError = (message: string, data?: unknown) =>
           const targetContainer = conversationMatch?.container || responseContainer;
           
           if (!targetContainer) {
-            if (pollTick % 5 === 0) {
-              logInfo("[Content] Waiting for response container", {
-                globalButtons: globalButtons.length,
-                globalImages: globalImages.length
-              });
-            }
             return false;
           }
           if (!baselineReady) {
@@ -1735,9 +1625,6 @@ const logError = (message: string, data?: unknown) =>
           }
           const responseState = getResponseReadyState(targetContainer);
           if (!responseState.ready) {
-            if (pollTick % 5 === 0) {
-              logInfo("[Content] Waiting for response ready", responseState);
-            }
             return false;
           }
           
@@ -1778,26 +1665,6 @@ const logError = (message: string, data?: unknown) =>
             latestDownloadButtons = scopedButtons;
           }
           
-          if (pollTick % 5 === 0) {
-            logInfo("[Content] Download button poll", {
-              scopedButtons: scopedButtons.length,
-              scopedImages: scopedImages.length,
-              loadedImages: loadedImages.length,
-              newImages: newImages.length,
-              baselineImages: responseBaselineSrcs.size,
-              scopedImageCandidates: scopedImageCandidates.length,
-              scopedVisibleImages: scopedVisibleImages.length,
-              scopedLargeImages: scopedLargeImages.length,
-              scopedLoadedImages: scopedLoadedImages.length,
-              directDownloadBtn: directDownloadBtn ? describeButton(directDownloadBtn) : null,
-              hasConversationMatch: Boolean(conversationMatch),
-              responseConnected: targetContainer.isConnected,
-              responseClass: targetContainer.className || "(none)",
-              sampleImage: scopedImageCandidates.length
-                ? describeImage(scopedImageCandidates[scopedImageCandidates.length - 1])
-                : null
-            });
-          }
           if (scopedButtons.length > 0 && hasNewImage) {
             latestDownloadButtons = scopedButtons;
             // Update responseContainer for later use
@@ -1805,15 +1672,6 @@ const logError = (message: string, data?: unknown) =>
               responseContainer = conversationMatch.container;
             }
             return true;
-          }
-          if (!hasNewGlobalContent && pollTick % 5 === 0) {
-            logInfo("[Content] Waiting for images/buttons", {
-              scopedButtons: scopedButtons.length,
-              scopedImages: scopedImages.length,
-              scopedLoadedImages: scopedLoadedImages.length,
-              globalButtons: globalButtons.length,
-              globalImages: globalImages.length
-            });
           }
           return false;
         },
@@ -1824,15 +1682,14 @@ const logError = (message: string, data?: unknown) =>
     } catch (err) {
       const stopBtn = getStopButton();
       if (stopBtn && isButtonEnabled(stopBtn)) {
-        logWarn("[Content] Generation timeout - stopping response");
         stopBtn.click();
         await wait(Math.max(200, CONFIG_STEP_DELAY));
       }
       throw err;
     }
 
-    logInfo("[Content] Download button detected", {
-      count: latestDownloadButtons.length
+    logInfo("[Content] Generation complete, waiting before download", {
+      sleepMs: CONFIG_STEP_DELAY * 2
     });
     await wait(CONFIG_STEP_DELAY * 2); // Stability wait
 
