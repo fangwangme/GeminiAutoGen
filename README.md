@@ -135,18 +135,25 @@ The extension will:
 
 ## ⏱️ Timing Defaults
 
-All timing values are configurable in **Settings**.
+All timing values are configurable in **Settings** (seconds).
 
-| Operation             | Default | Description                                       |
-| --------------------- | ------- | ------------------------------------------------- |
-| Image Generation      | 5 min   | Maximum wait for Gemini to generate               |
-| Download Verification | 2 min   | Wait for file to appear in source folder          |
-| Input Field Timeout   | 5 sec   | Wait for prompt input to appear                   |
-| Task Interval         | 5 sec   | Pause between closing old and opening new tab     |
-| Page Stability        | 30 sec  | Wait for page/images to stabilize                 |
-| Page Initialization   | 2 sec   | Extra wait after page load (2 × step delay)       |
-| Poll Interval         | 1 sec   | Base interval for input/send/generation polling   |
-| Step Delay            | 1 sec   | Base delay between UI actions                     |
+| Setting                 | Default          | Description                                          |
+| ----------------------- | ---------------- | ---------------------------------------------------- |
+| Image Generation Timeout| 120 sec (2 min)  | Max wait for Gemini to generate                      |
+| Download Wait Timeout   | 120 sec (2 min)  | Max wait for file to appear in source folder         |
+| Page Load / Stability   | 30 sec           | Wait for page load and image stability               |
+| Input Field Timeout     | 5 sec            | Wait for prompt input to appear                      |
+| Task Interval           | 5 sec            | Pause between tasks (close old tab, open new tab)    |
+| Action Step Delay       | 1 sec            | Base delay between UI actions                        |
+| Poll Interval           | 1 sec            | Interval for input/send/generation/download checks   |
+
+### Note on slow page loads
+
+If Gemini pages load slowly, increase **Action Step Delay** in Settings. It also scales these derived waits:
+- Tab ready delay after page load: `stepDelay * 2`
+- Send button timeout: `max(input timeout, stepDelay * 5)`
+- Page stability grace window: `min(page load/stability timeout, max(poll interval, stepDelay) * 2)`
+- UI action pauses: `stepDelay`, `stepDelay * 2`, `stepDelay * 3`, `stepDelay / 2`, `max(200ms, stepDelay / 5)`
 
 ## 🐛 Troubleshooting
 

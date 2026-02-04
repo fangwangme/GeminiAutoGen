@@ -489,6 +489,69 @@ const logError = (message: string, data?: unknown) =>
     return null;
   }
 
+  /**
+   * Check if Gemini page is fully loaded and ready for interaction.
+   * This goes beyond just finding the input field - it checks for core UI elements
+   * that indicate the page has finished initializing.
+   */
+  function isGeminiPageReady(): { ready: boolean; details: Record<string, unknown> } {
+    // 1. Check document ready state
+    const docReady = document.readyState === "complete";
+    
+    // 2. Check for input field
+    const inputField = findInputField();
+    const hasInputField = inputField !== null;
+    
+    // 3. Check for chat container (indicates main app loaded)
+    const chatContainerSelectors = [
+      "#chat-history",
+      ".chat-history-scroll-container",
+      "main[role='main']",
+      ".conversation-container"
+    ];
+    let hasChatContainer = false;
+    for (const selector of chatContainerSelectors) {
+      const el = document.querySelector<HTMLElement>(selector);
+      if (isVisible(el)) {
+        hasChatContainer = true;
+        break;
+      }
+    }
+    
+    // 4. Check that there's no loading spinner/skeleton
+    const loadingIndicators = [
+      ".loading-spinner",
+      ".skeleton-loader",
+      "[aria-busy='true']",
+      ".mat-progress-spinner"
+    ];
+    let hasLoadingIndicator = false;
+    for (const selector of loadingIndicators) {
+      const el = document.querySelector<HTMLElement>(selector);
+      if (isVisible(el)) {
+        hasLoadingIndicator = true;
+        break;
+      }
+    }
+    
+    // 5. Check for Gemini's app root (indicates Angular/React bootstrapped)
+    const appRoot = document.querySelector("bard-sidenav-container, chat-window, main");
+    const hasAppRoot = appRoot !== null && isVisible(appRoot as HTMLElement);
+    
+    const ready = docReady && hasInputField && hasChatContainer && !hasLoadingIndicator && hasAppRoot;
+    
+    return {
+      ready,
+      details: {
+        docReady,
+        hasInputField,
+        hasChatContainer,
+        hasLoadingIndicator,
+        hasAppRoot
+      }
+    };
+  }
+
   function getStopButton() {
     const selectors = [
       'button[aria-label="Stop responding"]',
@@ -1220,33 +1283,31 @@ const logError = (message: string, data?: unknown) =>
       return;
     }
 
-    // 4. Wait for input field
-    logInfo("[Content] Waiting for input field...");
+    // 4. Wait for Gemini page to be fully ready (not just input field)
+    logInfo("[Content] Waiting for Gemini page to be ready...");
     let inputField: HTMLElement | null = null;
     const inputWaitStart = Date.now();
     let lastInputWaitLog = 0;
-    const logInputWaitState = () => {
-      const editables = Array.from(
-        document.querySelectorAll<HTMLElement>("[contenteditable='true']")
-      );
-      const visibleEditables = editables.filter((el) => isVisible(el));
-      logInfo("[Content] Input field not ready yet", {
+    const logPageReadyState = () => {
+      const pageState = isGeminiPageReady();
+      logInfo("[Content] Page not ready yet", {
         elapsedMs: Date.now() - inputWaitStart,
-        readyState: document.readyState,
-        contentEditableCount: editables.length,
-        visibleContentEditableCount: visibleEditables.length
+        ...pageState.details
       });
     };
 
     try {
       await waitFor(
         () => {
-          inputField = findInputField();
-          if (inputField) return true;
+          const pageState = isGeminiPageReady();
+          if (pageState.ready) {
+            inputField = findInputField();
+            return true;
+          }
           const now = Date.now();
           if (now - lastInputWaitLog >= 3000) {
             lastInputWaitLog = now;
-            logInputWaitState();
+            logPageReadyState();
           }
           return false;
         },
@@ -1255,14 +1316,16 @@ const logError = (message: string, data?: unknown) =>
         t("content.error.timeoutInputField")
       );
     } catch (err) {
-      logError("[Content] Input field wait timed out", {
-        elapsedMs: Date.now() - inputWaitStart
+      logError("[Content] Page ready wait timed out", {
+        elapsedMs: Date.now() - inputWaitStart,
+        finalState: isGeminiPageReady().details
       });
       throw err;
     }
 
-    logInfo("[Content] Input field detected", {
-      elapsedMs: Date.now() - inputWaitStart
+    logInfo("[Content] Gemini page ready", {
+      elapsedMs: Date.now() - inputWaitStart,
+      ...isGeminiPageReady().details
     });
 
     if (!inputField) {
@@ -1438,6 +1501,22 @@ const logError = (message: string, data?: unknown) =>
     logInfo("[Content] Prompt sent.");
 
     await wait(CONFIG_STEP_DELAY);
+
+    // CRITICAL: Verify URL hasn't changed after sending (Gemini might auto-create new conversation)
+    const urlAfterSend = window.location.href;
+    if (!urlsMatch(lockedConversationUrl, urlAfterSend)) {
+      logError("[Content] URL changed after sending prompt!", {
+        expected: lockedConversationUrl,
+        actual: urlAfterSend
+      });
+      throw new TaskError(
+        t("content.error.lockedUrlMismatch", {
+          expected: lockedConversationUrl,
+          actual: urlAfterSend
+        }),
+        "locked-url"
+      );
+    }
 
     await waitFor(
       () => {
