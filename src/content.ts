@@ -1,4 +1,13 @@
 import type { TaskItem } from "./types.js";
+import {
+  urlsMatch,
+  validateLockedConversationUrl
+} from "./utils/lockedConversation.js";
+import {
+  isFolderAuthErrorMessage,
+  resolveTaskErrorType
+} from "./utils/errorClassifier.js";
+import { toSafeTaskFilename } from "./utils/taskQueue.js";
 type Language = "en" | "zh";
 
 const LANGUAGE_STORAGE_KEY = "uiLanguage";
@@ -163,64 +172,6 @@ const toErrorMessage = (err: unknown): string =>
 const normalizeTaskMode = (mode?: string): TaskMode =>
   mode === "download-only" ? "download-only" : "full";
 
-const normalizeUrlForCompare = (url: string) => {
-  try {
-    const parsed = new URL(url);
-    const normalizedPath = parsed.pathname.replace(/\/$/, "");
-    return `${parsed.origin}${normalizedPath}`;
-  } catch {
-    return url.replace(/\/$/, "");
-  }
-};
-
-const urlsMatch = (lockedUrl: string, currentUrl: string) =>
-  normalizeUrlForCompare(lockedUrl) === normalizeUrlForCompare(currentUrl);
-
-const isGeminiHost = (hostname: string) =>
-  hostname === "gemini.google.com" || hostname.endsWith(".gemini.google.com");
-
-const validateLockedConversationUrl = (url: string) => {
-  try {
-    const parsed = new URL(url);
-    if (!isGeminiHost(parsed.hostname)) {
-      return {
-        ok: false,
-        message: t("validation.lockedUrl.mustGemini")
-      } as const;
-    }
-    const normalizedPath = parsed.pathname.replace(/\/$/, "");
-    const pathWithoutAccount = normalizedPath.replace(/^\/u\/\d+/, "");
-    if (pathWithoutAccount === "/app") {
-      return {
-        ok: false,
-        message: t("validation.lockedUrl.mustSpecificConversation")
-      } as const;
-    }
-    if (!pathWithoutAccount.includes("/app/")) {
-      return {
-        ok: false,
-        message: t("validation.lockedUrl.mustConversation")
-      } as const;
-    }
-    return { ok: true } as const;
-  } catch {
-    return { ok: false, message: t("validation.lockedUrl.invalid") } as const;
-  }
-};
-
-const isFolderAuthErrorMessage = (message: string) => {
-  const normalized = message.toLowerCase();
-  return [
-    "missing directory handles",
-    "permission lost",
-    "directory iteration is not supported",
-    "notallowederror",
-    "securityerror",
-    "permission",
-    "not authorized",
-    "denied"
-  ].some((fragment) => normalized.includes(fragment));
-};
 
 class TaskError extends Error {
   errorType: TaskErrorType;
@@ -1127,13 +1078,7 @@ const logError = (message: string, data?: unknown) =>
     );
 
     // 2. Prepare filename for skip check
-    let filename = task.name.replace(/[^a-z0-9_\-.]/gi, "_");
-    if (
-      !filename.toLowerCase().endsWith(".png") &&
-      !filename.toLowerCase().endsWith(".jpg")
-    ) {
-      filename += ".png";
-    }
+    const filename = toSafeTaskFilename(task.name);
 
     const composedPrompt = `name: ${filename}\nprompt: ${task.prompt}`;
     const promptAnchorText = `name: ${filename}`;
@@ -1147,9 +1092,7 @@ const logError = (message: string, data?: unknown) =>
     if (checkResult?.error) {
       const errorType: TaskErrorType = checkResult.errorType
         ? checkResult.errorType
-        : isFolderAuthErrorMessage(checkResult.error)
-          ? "folder"
-          : "download";
+        : resolveTaskErrorType(checkResult.error);
       throw new TaskError(checkResult.error, errorType);
     }
 
@@ -1170,7 +1113,10 @@ const logError = (message: string, data?: unknown) =>
         "locked-url"
       );
     }
-    const lockedValidation = validateLockedConversationUrl(lockedConversationUrl);
+    const lockedValidation = validateLockedConversationUrl(
+      lockedConversationUrl,
+      t
+    );
     if (!lockedValidation.ok) {
       throw new TaskError(lockedValidation.message, "locked-url");
     }
@@ -1714,11 +1660,9 @@ const logError = (message: string, data?: unknown) =>
     const errorType: TaskErrorType =
       err instanceof TaskError
         ? err.errorType
-        : isFolderAuthErrorMessage(message)
-          ? "folder"
-          : currentPhase === "download"
-            ? "download"
-            : "generation";
+        : currentPhase === "download"
+          ? resolveTaskErrorType(message, "download")
+          : resolveTaskErrorType(message);
     logError("[Content] Error", { message, errorType });
     updateStatus(
       t("content.status.error", {

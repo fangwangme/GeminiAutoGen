@@ -5,6 +5,7 @@ import {
   LANGUAGE_STORAGE_KEY,
   normalizeLanguage
 } from "./i18n.js";
+import { isFolderAuthErrorMessage } from "./utils/errorClassifier.js";
 
 const formatLogTimestamp = () => new Date().toISOString();
 const attachConsoleTimestamps = () => {
@@ -65,20 +66,6 @@ const normalizePositive = (value: number | undefined, fallback: number) =>
 
 const toErrorMessage = (err: unknown) =>
   err instanceof Error ? err.message : String(err);
-
-const isFolderAuthErrorMessage = (message: string) => {
-  const normalized = message.toLowerCase();
-  return [
-    "missing directory handles",
-    "permission lost",
-    "directory iteration is not supported",
-    "notallowederror",
-    "securityerror",
-    "permission",
-    "not authorized",
-    "denied"
-  ].some((fragment) => normalized.includes(fragment));
-};
 
 const isImageFilename = (filename: string) =>
   /\.(png|jpe?g|webp)$/i.test(filename);

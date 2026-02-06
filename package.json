@@ -6,7 +6,9 @@
   "scripts": {
     "build": "vite build && node scripts/copy-static.mjs",
     "build:watch": "vite build --watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:bdd": "BDD_VERBOSE=1 node --test tests/bdd/**/*.test.mjs",
+    "test:bdd:quiet": "node --test tests/bdd/**/*.test.mjs"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.254",

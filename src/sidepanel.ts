@@ -8,6 +8,12 @@ import {
   LANGUAGE_STORAGE_KEY,
   normalizeLanguage
 } from "./i18n.js";
+import {
+  urlsMatch,
+  validateLockedConversationUrl
+} from "./utils/lockedConversation.js";
+import { buildPendingTaskQueue, toSafeTaskFilename } from "./utils/taskQueue.js";
+import { decideTaskErrorOutcome } from "./utils/retryPolicy.js";
 
 const formatLogTimestamp = () => new Date().toISOString();
 const attachConsoleTimestamps = () => {
@@ -134,71 +140,6 @@ const executeScript = (
     injection
   ) as unknown as Promise<InjectionResult[]>;
 
-const normalizeUrlForCompare = (url: string) => {
-  try {
-    const parsed = new URL(url);
-    const normalizedPath = parsed.pathname.replace(/\/$/, "");
-    return `${parsed.origin}${normalizedPath}`;
-  } catch {
-    return url.replace(/\/$/, "");
-  }
-};
-
-const urlsMatch = (lockedUrl: string, currentUrl: string) =>
-  normalizeUrlForCompare(lockedUrl) === normalizeUrlForCompare(currentUrl);
-
-const isGeminiHost = (hostname: string) =>
-  hostname === "gemini.google.com" || hostname.endsWith(".gemini.google.com");
-
-const validateLockedConversationUrl = (url: string) => {
-  try {
-    const parsed = new URL(url);
-    if (!isGeminiHost(parsed.hostname)) {
-      return {
-        ok: false,
-        message: t("validation.lockedUrl.mustGemini")
-      } as const;
-    }
-    const normalizedPath = parsed.pathname.replace(/\/$/, "");
-    const pathWithoutAccount = normalizedPath.replace(/^\/u\/\d+/, "");
-    if (pathWithoutAccount === "/app") {
-      return {
-        ok: false,
-        message: t("validation.lockedUrl.mustSpecificConversation")
-      } as const;
-    }
-    if (!pathWithoutAccount.includes("/app/")) {
-      return {
-        ok: false,
-        message: t("validation.lockedUrl.mustConversation")
-      } as const;
-    }
-    return { ok: true } as const;
-  } catch {
-    return { ok: false, message: t("validation.lockedUrl.invalid") } as const;
-  }
-};
-
-const isFolderAuthErrorMessage = (message: string) => {
-  const normalized = message.toLowerCase();
-  return [
-    "missing directory handles",
-    "permission lost",
-    "directory iteration is not supported",
-    "notallowederror",
-    "securityerror",
-    "permission",
-    "not authorized",
-    "denied"
-  ].some((fragment) => normalized.includes(fragment));
-};
-
-const isDownloadErrorMessage = (message: string) => {
-  const normalized = message.toLowerCase();
-  return ["download", "rename", "waiting for file", "timeout waiting for download"].some(
-    (fragment) => normalized.includes(fragment)
-  );
-};
 
 document.addEventListener("DOMContentLoaded", async () => {
   // UI Elements
@@ -291,7 +232,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
 
-    const validation = validateLockedConversationUrl(lockedConversationUrl);
+    const validation = validateLockedConversationUrl(lockedConversationUrl, t);
     if (validation.ok) {
       urlStatus.textContent = t("sidepanel.status.urlLocked");
       urlStatus.style.color = "var(--success)";
@@ -404,7 +345,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   ]);
   if (urlData.lockedConversationUrl) {
     const candidate = urlData.lockedConversationUrl.trim();
-    const validation = validateLockedConversationUrl(candidate);
+    const validation = validateLockedConversationUrl(candidate, t);
     conversationUrlInput.value = candidate;
     if (validation.ok) {
       lockedConversationUrl = candidate;
@@ -439,7 +380,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         urlStatus.style.color = "var(--danger)";
         return;
       }
-      const validation = validateLockedConversationUrl(url);
+      const validation = validateLockedConversationUrl(url, t);
       if (!validation.ok) {
         urlStatus.textContent = t("sidepanel.status.validationError", {
           reason: validation.message
@@ -531,7 +472,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       statusText.style.color = "var(--danger)";
       return;
     }
-    const lockedValidation = validateLockedConversationUrl(lockedCandidate);
+    const lockedValidation = validateLockedConversationUrl(lockedCandidate, t);
     if (!lockedValidation.ok) {
       statusText.textContent = t("sidepanel.status.lockedUrlInvalid", {
         reason: lockedValidation.message
@@ -603,17 +544,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     // Filter queue
-    taskQueue = loadedTasks.filter((item) => {
-      if (!item || !item.name) return false; // Skip invalid items
-      let safeName = item.name.replace(/[^a-z0-9_\-.]/gi, "_");
-      if (
-        !safeName.toLowerCase().endsWith(".png") &&
-        !safeName.toLowerCase().endsWith(".jpg")
-      ) {
-        safeName += ".png";
-      }
-      return !existingFiles.has(safeName);
-    });
+    taskQueue = buildPendingTaskQueue(loadedTasks, existingFiles);
 
     const skipped = loadedTasks.length - taskQueue.length;
     if (skipped > 0) {
@@ -762,13 +693,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const total = taskQueue.length;
 
     // Get safe filename for display
-    let displayName = task.name.replace(/[^a-z0-9_\-.]/gi, "_");
-    if (
-      !displayName.toLowerCase().endsWith(".png") &&
-      !displayName.toLowerCase().endsWith(".jpg")
-    ) {
-      displayName += ".png";
-    }
+    const displayName = toSafeTaskFilename(task.name);
 
     // Update progress
     progressText.textContent = t("sidepanel.status.taskProgress", {
@@ -825,15 +750,18 @@ document.addEventListener("DOMContentLoaded", async () => {
       0,
       settings.settings_maxConsecutiveFailures ?? 5
     );
-    const resolvedErrorType: TaskErrorType =
-      errorType ??
-      (isFolderAuthErrorMessage(error)
-        ? "folder"
-        : isDownloadErrorMessage(error)
-          ? "download"
-          : "generation");
+    const currentRetries = retryCounts.get(currentIndex) ?? 0;
+    const decision = decideTaskErrorOutcome({
+      error,
+      errorType,
+      currentRetries,
+      maxRetries,
+      consecutiveFailureCount,
+      maxConsecutiveFailures
+    });
+    const resolvedErrorType = decision.resolvedErrorType;
 
-    if (resolvedErrorType === "locked-url") {
+    if (decision.action === "stop-locked-url") {
       statusText.textContent = error || t("sidepanel.status.lockedUrlError");
       statusText.style.color = "var(--danger)";
       appendLogLine(`Locked URL error - stopped: ${error}`);
@@ -856,7 +784,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
 
-    if (resolvedErrorType === "folder") {
+    if (decision.action === "stop-folder") {
       statusText.textContent = t("sidepanel.status.folderAccessError", {
         error
       });
@@ -868,13 +796,11 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
 
-    const currentRetries = retryCounts.get(currentIndex) ?? 0;
-
-    if (currentRetries < maxRetries) {
-      const nextRetry = currentRetries + 1;
+    if (decision.action === "retry-download" || decision.action === "retry-full") {
+      const nextRetry = decision.nextRetryCount;
       retryCounts.set(currentIndex, nextRetry);
       const retryLabel =
-        resolvedErrorType === "download"
+        decision.action === "retry-download"
           ? t("sidepanel.status.retryingDownloadShort")
           : t("sidepanel.status.retrying");
       statusText.textContent = t("sidepanel.status.retryingWithCount", {
@@ -883,7 +809,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         max: maxRetries
       });
       statusText.style.color = "var(--warning)";
-      if (resolvedErrorType === "download") {
+      if (decision.action === "retry-download") {
         nextTaskMode = "download-only";
         void processNextTask();
       } else {
@@ -894,13 +820,15 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     retryCounts.delete(currentIndex);
-    failedCount += 1;
-    consecutiveFailureCount += 1;
+    if (decision.shouldIncrementFailedCount) {
+      failedCount += 1;
+    }
+    consecutiveFailureCount = decision.nextConsecutiveFailureCount;
     appendLogLine(`Failed task ${currentIndex + 1} (${resolvedErrorType}): ${error}`);
     statusText.textContent = t("sidepanel.status.failed", { error });
     statusText.style.color = "var(--danger)";
 
-    if (maxConsecutiveFailures > 0 && consecutiveFailureCount >= maxConsecutiveFailures) {
+    if (decision.action === "fail-stop") {
       statusText.textContent = t("sidepanel.status.stoppedAfterFailures", {
         count: consecutiveFailureCount,
         error
