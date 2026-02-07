@@ -320,6 +320,11 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (!text.trim()) return;
       try {
         await navigator.clipboard.writeText(text);
+        const originalText = logCopyBtn.textContent;
+        logCopyBtn.textContent = t("sidepanel.currentFile.copied");
+        setTimeout(() => {
+          logCopyBtn.textContent = originalText;
+        }, 800);
       } catch (err) {
         console.error("[Panel] Failed to copy logs:", err);
       }
@@ -492,31 +497,37 @@ document.addEventListener("DOMContentLoaded", async () => {
     conversationUrl = lockedConversationUrl;
     console.log(`[Panel] Using locked conversation URL: ${conversationUrl}`);
 
+    const stepSettings = await storageGet<{
+      settings_stepDelay?: number;
+      settings_pageLoadTimeout?: number;
+    }>(["settings_stepDelay", "settings_pageLoadTimeout"]);
+    const pageLoadTimeoutMs = (stepSettings.settings_pageLoadTimeout || 30) * 1000;
+    const rawStepDelay = stepSettings.settings_stepDelay;
+    const normalizedStepDelay =
+      rawStepDelay && rawStepDelay > 60 ? rawStepDelay / 1000 : rawStepDelay;
+    const tabReadyDelayMs = (normalizedStepDelay || 1) * 2 * 1000;
+
     // Get or create tab for the locked URL
-    const [existingTab] = await tabsQuery({
-      url: `${conversationUrl}*`,
-      currentWindow: true
-    });
+    const existingTab = (await tabsQuery({ currentWindow: true })).find(
+      (tab) =>
+        typeof tab.id === "number" &&
+        typeof tab.url === "string" &&
+        urlsMatch(conversationUrl, tab.url)
+    );
 
     if (existingTab && typeof existingTab.id === "number") {
       currentTabId = existingTab.id;
       await tabsUpdate(currentTabId, { active: true });
+      if (existingTab.status === "loading") {
+        await waitForPageLoad(currentTabId, pageLoadTimeoutMs);
+        await new Promise((r) => setTimeout(r, tabReadyDelayMs));
+      }
     } else {
       // Create new tab with locked URL
       const newTab = await tabsCreate({ url: conversationUrl });
       currentTabId = newTab.id ?? null;
       if (currentTabId) {
-        const stepSettings = await storageGet<{
-          settings_stepDelay?: number;
-          settings_pageLoadTimeout?: number;
-        }>(["settings_stepDelay", "settings_pageLoadTimeout"]);
-        const pageLoadTimeoutMs =
-          (stepSettings.settings_pageLoadTimeout || 30) * 1000;
         await waitForPageLoad(currentTabId, pageLoadTimeoutMs);
-        const rawStepDelay = stepSettings.settings_stepDelay;
-        const normalizedStepDelay =
-          rawStepDelay && rawStepDelay > 60 ? rawStepDelay / 1000 : rawStepDelay;
-        const tabReadyDelayMs = (normalizedStepDelay || 1) * 2 * 1000;
         await new Promise((r) => setTimeout(r, tabReadyDelayMs));
       }
     }
@@ -524,6 +535,16 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (!currentTabId) {
       statusText.textContent = t("sidepanel.status.failedToOpenTab");
       statusText.style.color = "var(--danger)";
+      return;
+    }
+
+    const lockOk = await ensureLockedConversationTab(
+      currentTabId,
+      pageLoadTimeoutMs,
+      normalizedStepDelay,
+      "start"
+    );
+    if (!lockOk) {
       return;
     }
 
@@ -566,10 +587,15 @@ document.addEventListener("DOMContentLoaded", async () => {
     failedCount = 0;
     consecutiveFailureCount = 0;
     nextTaskMode = "full";
-    failedCount = 0;
-    consecutiveFailureCount = 0;
-    nextTaskMode = "full";
     isRunning = true;
+    
+    clearLogOutput();
+    appendLogLine(t("sidepanel.log.starting"));
+    if (skipped > 0) {
+      appendLogLine(t("sidepanel.status.skippedExisting", { count: skipped }));
+    }
+    appendLogLine(t("sidepanel.status.taskProgress", { current: 1, total: taskQueue.length }));
+
     updateUI(true);
     startTimer();
 
@@ -686,10 +712,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     const task = taskQueue[currentIndex];
     const taskMode = nextTaskMode;
     nextTaskMode = "full";
-    if (lastLogTaskIndex !== currentIndex) {
-      clearLogOutput();
-      lastLogTaskIndex = currentIndex;
-    }
+    lastLogTaskIndex = currentIndex;
+    
+    // Clear logs for each new task to keep it clean
+    clearLogOutput();
+    
     const total = taskQueue.length;
 
     // Get safe filename for display
@@ -899,6 +926,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
+  const shouldCreatePlaceholder = (tabsCount: number): boolean => {
+    return tabsCount <= 1;
+  };
+
   // Recreate tab: close old tab, open new one
   async function recreateTab() {
     console.log("[Panel] Recreating tab...");
@@ -913,12 +944,21 @@ document.addEventListener("DOMContentLoaded", async () => {
     const taskInterval = (settings.settings_taskInterval || 5) * 1000;
     const pageLoadTimeout = (settings.settings_pageLoadTimeout || 30) * 1000;
 
-    // Close current tab
+    // Close current tab with window protection
     if (currentTabId) {
       try {
+        const tab = await tabsGet(currentTabId);
+        const windowTabs = await tabsQuery({ windowId: tab.windowId });
+        
+        // If this is the last tab in the window, create a placeholder first
+        if (shouldCreatePlaceholder(windowTabs.length)) {
+          console.log("[Panel] Last tab in window, creating placeholder...");
+          await tabsCreate({ windowId: tab.windowId, active: false, url: "about:blank" });
+        }
+        
         await tabsRemove(currentTabId);
       } catch (err) {
-        console.log("[Panel] Tab already closed:", err);
+        console.log("[Panel] Tab already closed or window error:", err);
       }
     }
 
@@ -967,23 +1007,59 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // Wait for page to finish loading
-  function waitForPageLoad(tabId: number, timeoutMs: number) {
+  async function waitForPageLoad(tabId: number, timeoutMs: number) {
+    console.log(`[Panel] Waiting for tab ${tabId} to load...`);
+    const start = Date.now();
+
+    // 1. Immediate check
+    try {
+      const tab = await tabsGet(tabId);
+      if (tab.status === "complete") {
+        console.log(`[Panel] Tab ${tabId} already complete.`);
+        return;
+      }
+    } catch (err) {
+      console.warn("[Panel] Failed to check tab status immediately:", err);
+    }
+
+    // 2. Listener and Polling fallback
     return new Promise<void>((resolve) => {
+      let resolved = false;
+
+      const done = (reason: string) => {
+        if (resolved) return;
+        resolved = true;
+        chrome.tabs.onUpdated.removeListener(listener);
+        clearInterval(pollInterval);
+        console.log(`[Panel] Tab ${tabId} load finished (${reason})`);
+        resolve();
+      };
+
       const listener = (
         updatedTabId: number,
         changeInfo: chrome.tabs.TabChangeInfo
       ) => {
         if (updatedTabId === tabId && changeInfo.status === "complete") {
-          chrome.tabs.onUpdated.removeListener(listener);
-          resolve();
+          done("event");
         }
       };
       chrome.tabs.onUpdated.addListener(listener);
 
+      // Polling fallback every 1s
+      const pollInterval = setInterval(async () => {
+        try {
+          const tab = await tabsGet(tabId);
+          if (tab.status === "complete") {
+            done("polling");
+          }
+        } catch {
+          done("error-polling");
+        }
+      }, 1000);
+
       // Timeout fallback
       setTimeout(() => {
-        chrome.tabs.onUpdated.removeListener(listener);
-        resolve();
+        done("timeout");
       }, timeoutMs);
     });
   }

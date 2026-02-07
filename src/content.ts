@@ -1,13 +1,83 @@
-import type { TaskItem } from "./types.js";
-import {
-  urlsMatch,
-  validateLockedConversationUrl
-} from "./utils/lockedConversation.js";
-import {
-  isFolderAuthErrorMessage,
-  resolveTaskErrorType
-} from "./utils/errorClassifier.js";
-import { toSafeTaskFilename } from "./utils/taskQueue.js";
+// Self-contained utility functions to avoid imports
+const toSafeTaskFilename = (name: string): string => {
+  let safeName = (name || "").replace(/[^a-z0-9_\-.]/gi, "_");
+  if (!safeName.toLowerCase().endsWith(".png") && !safeName.toLowerCase().endsWith(".jpg")) {
+    safeName += ".png";
+  }
+  return safeName;
+};
+
+const urlsMatch = (url1: string, url2: string): boolean => {
+  const normalize = (u: string) => {
+    try {
+      const parsed = new URL(u);
+      const path = parsed.pathname.replace(/\/$/, "");
+      return `${parsed.origin}${path}`;
+    } catch {
+      return u.replace(/\/$/, "");
+    }
+  };
+  return normalize(url1) === normalize(url2);
+};
+
+const isGeminiHost = (hostname: string): boolean => {
+  return hostname === "gemini.google.com" || hostname.endsWith(".gemini.google.com");
+};
+
+const validateLockedConversationUrl = (
+  url: string,
+  t: (key: string) => string
+): { ok: boolean; message?: string } => {
+  try {
+    const parsed = new URL(url);
+    if (!isGeminiHost(parsed.hostname)) {
+      return { ok: false, message: t("validation.lockedUrl.mustGemini") };
+    }
+    const path = parsed.pathname.replace(/\/$/, "").replace(/^\/u\/\d+/, "");
+    if (path === "/app") {
+      return {
+        ok: false,
+        message: t("validation.lockedUrl.mustSpecificConversation")
+      };
+    }
+    if (path.includes("/app/")) {
+      return { ok: true };
+    }
+    return { ok: false, message: t("validation.lockedUrl.mustConversation") };
+  } catch {
+    return { ok: false, message: t("validation.lockedUrl.invalid") };
+  }
+};
+
+// Inline historyLoadGate logic to avoid code splitting in injected script
+const evaluateHistoryImageWait = ({
+  hasHistory,
+  hasAnyImage,
+  lastImageLoaded,
+  elapsedMs,
+  graceMs
+}: {
+  hasHistory: boolean;
+  hasAnyImage: boolean;
+  lastImageLoaded: boolean;
+  elapsedMs: number;
+  graceMs: number;
+}) => {
+  if (!hasHistory) {
+    return { shouldWait: false, reason: "no-history" };
+  }
+  if (hasAnyImage) {
+    if (lastImageLoaded) {
+      return { shouldWait: false, reason: "last-image-ready" };
+    }
+    return { shouldWait: true, reason: "waiting-last-image" };
+  }
+  if (elapsedMs >= graceMs) {
+    return { shouldWait: false, reason: "history-no-image" };
+  }
+  return { shouldWait: true, reason: "waiting-image-appear" };
+};
+
 type Language = "en" | "zh";
 
 const LANGUAGE_STORAGE_KEY = "uiLanguage";
@@ -681,6 +751,21 @@ const logError = (message: string, data?: unknown) =>
     return null;
   }
 
+  function getLastConversationContainer() {
+    const containers = document.querySelectorAll<HTMLElement>(
+      ".conversation-container"
+    );
+    if (!containers.length) return null;
+    return containers[containers.length - 1] as HTMLElement;
+  }
+
+  function getLastGeneratedImageInConversation(container: Element | null) {
+    if (!container) return null;
+    const images = getGeneratedImageCandidates(container);
+    if (!images.length) return null;
+    return images[images.length - 1] as HTMLImageElement;
+  }
+
   /**
    * Find conversation container by matching prompt/name text in user-query
    * Returns the LAST matching conversation (most recent)
@@ -1120,8 +1205,16 @@ const logError = (message: string, data?: unknown) =>
     if (!lockedValidation.ok) {
       throw new TaskError(lockedValidation.message, "locked-url");
     }
-    const currentUrl = window.location.href;
-    if (!urlsMatch(lockedConversationUrl, currentUrl)) {
+    const assertLockedConversationUrlMatch = (phase: string) => {
+      const currentUrl = window.location.href;
+      if (urlsMatch(lockedConversationUrl, currentUrl)) {
+        return;
+      }
+      logError("[Content] Locked URL mismatch", {
+        phase,
+        expected: lockedConversationUrl,
+        actual: currentUrl
+      });
       throw new TaskError(
         t("content.error.lockedUrlMismatch", {
           expected: lockedConversationUrl,
@@ -1129,7 +1222,9 @@ const logError = (message: string, data?: unknown) =>
         }),
         "locked-url"
       );
-    }
+    };
+
+    assertLockedConversationUrlMatch("task-start");
 
     if (taskMode === "download-only") {
       const downloadContext = await prepareDownloadOnlyContext(
@@ -1204,64 +1299,75 @@ const logError = (message: string, data?: unknown) =>
     }
     const initialInputField = inputField as HTMLElement;
 
-    // 4.5 Wait for page to stabilize (previous images fully loaded)
-    logInfo("[Content] Checking page stability", {
-      timeoutMs: CONFIG_STABILITY_TIMEOUT,
-      stepDelayMs: CONFIG_STEP_DELAY
-    });
+    try {
+      if (!task) throw new Error("Task object is missing at processor start");
 
-    // Find generated images (usually inside model response containers)
-    const getStableGeneratedImages = () =>
-      Array.from(
-        document.querySelectorAll<HTMLImageElement>(
-          'img[src*="blob:"], img[src*="googleusercontent"], img[alt*="Generated"]'
-        )
-      ).filter((img) => isVisible(img) && img.width > 100); // Exclude tiny icons
+      logInfo(`[Content] Task started: ${task.name} (mode: ${taskMode})`);
 
-    const stabilityTimeout = CONFIG_STABILITY_TIMEOUT; // User setting
-    const stabilityStart = Date.now();
+            // 4.5 Wait for history to settle (last image in last conversation)
+            const containers = document.querySelectorAll(".conversation-container");
+            const hasHistory = containers.length > 0;
+            
+            const lastConversation = hasHistory ? getLastConversationContainer() : null;
+            const historyImages = lastConversation ? getGeneratedImageCandidates(lastConversation) : [];
+            
+            logInfo(`[Content] History check: hasHistory=${hasHistory}, containers=${containers.length}, lastConvImages=${historyImages.length}`);
+            
+            if (hasHistory) {
+              // If the last conversation clearly has no images after a short wait, don't block
+              logInfo(`[Content] Waiting for history images to settle...`);        const stabilityTimeout = CONFIG_STABILITY_TIMEOUT;
+        const stabilityStart = Date.now();
+        let lastReportTime = 0;
 
-    // Wait for at least 1 image to exist AND all images to be loaded
-    while (true) {
-      if (Date.now() - stabilityStart > stabilityTimeout) {
-        const timeoutSeconds = Math.round(stabilityTimeout / 1000);
-        throw new Error(
-          t("content.error.pageStabilityTimeout", {
-            seconds: timeoutSeconds
-          })
-        );
+        while (true) {
+          const elapsedMs = Date.now() - stabilityStart;
+          if (elapsedMs > stabilityTimeout) {
+            const timeoutSeconds = Math.round(stabilityTimeout / 1000);
+            throw new Error(
+              t("content.error.pageStabilityTimeout", {
+                seconds: timeoutSeconds
+              })
+            );
+          }
+
+          const lastConversation = getLastConversationContainer();
+          const lastImage = getLastGeneratedImageInConversation(lastConversation);
+          const hasAnyImage = Boolean(lastImage);
+          const lastImageLoaded =
+            !!lastImage &&
+            isImageLoaded(lastImage) &&
+            (lastImage.naturalWidth > 100 || lastImage.width > 100);
+
+          const waitDecision = evaluateHistoryImageWait({
+            hasHistory,
+            hasAnyImage,
+            lastImageLoaded,
+            elapsedMs,
+            graceMs: CONFIG_STABILITY_GRACE
+          });
+
+          if (!waitDecision.shouldWait) {
+            logInfo(`[Content] History ready: ${waitDecision.reason}`);
+            break;
+          }
+
+          // Log every 2 seconds while waiting
+          if (Date.now() - lastReportTime > 2000) {
+            logInfo(`[Content] Still waiting: ${waitDecision.reason} (${Math.round(elapsedMs / 1000)}s)`);
+            lastReportTime = Date.now();
+          }
+
+          await wait(CONFIG_STEP_DELAY);
+        }
+      } else {
+        logInfo("[Content] No history detected, proceeding");
       }
-
-      await wait(CONFIG_STEP_DELAY);
-
-      const images = getStableGeneratedImages();
-      const btns = getDownloadBtns();
-
-      // Check if all images are fully loaded
-      const allLoaded =
-        images.length > 0 &&
-        images.every((img) => img.complete && img.naturalWidth > 0);
-
-      // Alternative: if no images found but we have download buttons, count those as stable
-      const hasButtons = btns.length > 0;
-
-      if (
-        allLoaded ||
-        (hasButtons && Date.now() - stabilityStart > CONFIG_STABILITY_GRACE)
-      ) {
-        logInfo("[Content] Page stable");
-        break;
-      }
-
-      // Also allow proceeding if we waited 10+ seconds with 0 images (new conversation)
-      if (
-        images.length === 0 &&
-        btns.length === 0 &&
-        Date.now() - stabilityStart > CONFIG_STABILITY_GRACE
-      ) {
-        logInfo("[Content] No existing images, proceeding");
-        break;
-      }
+    } catch (initErr) {
+      logError("[Content] Critical error during history wait initialization", {
+        error: String(initErr),
+        stack: (initErr as Error).stack
+      });
+      throw initErr;
     }
 
     // Extra safety wait before starting task
@@ -1277,6 +1383,8 @@ const logError = (message: string, data?: unknown) =>
     await scrollToBottom();
     await wait(CONFIG_STEP_DELAY); // Wait after scroll
 
+    assertLockedConversationUrlMatch("before-type");
+
     // 6. Activate and type
     logInfo("[Content] Typing prompt...");
     initialInputField.click();
@@ -1284,7 +1392,7 @@ const logError = (message: string, data?: unknown) =>
     initialInputField.focus();
     await wait(Math.max(200, CONFIG_STEP_DELAY / 5));
 
-    // Clear if needed
+    // Clear existing text if any
     if (initialInputField.innerText.trim().length > 0) {
       document.execCommand("selectAll", false, undefined);
       document.execCommand("delete", false, undefined);
@@ -1359,6 +1467,8 @@ const logError = (message: string, data?: unknown) =>
       : null;
     const lastContainerIdBeforeSend = lastContainerBeforeSend?.id || null;
 
+    assertLockedConversationUrlMatch("before-send");
+
     await wait(CONFIG_STEP_DELAY / 2);
     sendButton.focus({ preventScroll: true });
     sendButton.click();
@@ -1366,19 +1476,6 @@ const logError = (message: string, data?: unknown) =>
 
     logInfo("[Content] Sleep after send", { sleepMs: CONFIG_STEP_DELAY });
     await wait(CONFIG_STEP_DELAY);
-
-    // CRITICAL: Verify URL hasn't changed after sending (Gemini might auto-create new conversation)
-    const urlAfterSend = window.location.href;
-    if (!urlsMatch(lockedConversationUrl, urlAfterSend)) {
-      logError("[Content] URL changed after sending prompt");
-      throw new TaskError(
-        t("content.error.lockedUrlMismatch", {
-          expected: lockedConversationUrl,
-          actual: urlAfterSend
-        }),
-        "locked-url"
-      );
-    }
 
     logInfo("[Content] Waiting for input to clear", {
       timeoutMs: CONFIG_INPUT_TIMEOUT,
