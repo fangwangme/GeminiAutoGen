@@ -301,10 +301,6 @@ const logError = (message: string, data?: unknown) =>
   const normalizedPollIntervalSeconds =
     pollIntervalSeconds > 0 ? pollIntervalSeconds : 1;
   const CONFIG_POLL = normalizedPollIntervalSeconds * 1000;
-  const CONFIG_STABILITY_GRACE = Math.min(
-    CONFIG_STABILITY_TIMEOUT,
-    Math.max(CONFIG_POLL, CONFIG_STEP_DELAY) * 2
-  );
   const CONFIG_SEND_TIMEOUT = Math.max(CONFIG_INPUT_TIMEOUT, CONFIG_STEP_DELAY * 5);
 
   logInfo("[Content] Timing config", {
@@ -791,44 +787,6 @@ const logError = (message: string, data?: unknown) =>
   }
 
   /**
-   * Wait for a new conversation container to appear that matches the prompt
-   */
-  async function waitForConversationContainer(
-    promptText: string,
-    nameText: string,
-    afterContainerId: string | null,
-    timeout: number,
-    pollInterval: number
-  ): Promise<{ container: HTMLElement; userQuery: HTMLElement } | null> {
-    const start = Date.now();
-    while (Date.now() - start < timeout) {
-      const match = findConversationByPrompt(promptText, nameText);
-      if (match) {
-        // If we have an "after" container ID, make sure this is a NEW container
-        if (afterContainerId) {
-          if (match.container.id !== afterContainerId) {
-            return match;
-          }
-        } else {
-          return match;
-        }
-      }
-      await wait(pollInterval);
-    }
-    return null;
-  }
-
-  /**
-   * Check if image is fully loaded (via class or complete property)
-   */
-  function isImageLoaded(img: HTMLImageElement): boolean {
-    // Gemini adds 'loaded' class when image is ready
-    if (img.classList.contains("loaded")) return true;
-    // Fallback: check native complete property
-    return img.complete && img.naturalWidth > 0;
-  }
-
-  /**
    * Get generated images within a container that are fully loaded
    */
   function getLoadedImagesInContainer(container: Element): HTMLImageElement[] {
@@ -931,22 +889,6 @@ const logError = (message: string, data?: unknown) =>
     );
   }
 
-  function isElementAfterAnchor(anchor: Element | null, element: Element | null) {
-    if (!element) return false;
-    if (!anchor) return true;
-    if (element.contains(anchor)) return true;
-    return Boolean(
-      anchor.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING
-    );
-  }
-
-  function getDownloadButtonsAfterAnchor(
-    anchor: Element | null,
-    includeHidden = false
-  ) {
-    return getElementsAfterAnchor(getDownloadBtns(includeHidden), anchor);
-  }
-
   function getDownloadButtonsInContainer(
     container: Element,
     includeHidden = false,
@@ -965,10 +907,6 @@ const logError = (message: string, data?: unknown) =>
       "download-generated-image-button button, button[data-test-id=\"download-generated-image-button\"], button[aria-label*=\"Download\"], button[mattooltip*=\"Download\"]"
     );
     return button || null;
-  }
-
-  function getGeneratedImagesAfterAnchor(anchor: Element | null) {
-    return getElementsAfterAnchor(getGeneratedImages(), anchor);
   }
 
   async function scrollToBottom() {
