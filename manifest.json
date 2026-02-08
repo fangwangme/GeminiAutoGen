@@ -12,6 +12,12 @@
     "sidePanel"
   ],
   "host_permissions": ["https://gemini.google.com/*"],
+  "web_accessible_resources": [
+    {
+      "resources": ["content.js", "chunks/*.js"],
+      "matches": ["https://gemini.google.com/*"]
+    }
+  ],
   "action": {
     "default_title": "Open Gemini AutoGen"
   },

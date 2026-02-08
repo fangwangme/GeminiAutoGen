@@ -323,6 +323,7 @@ async function waitForDownloadAndRename(
   // 2. Poll for new file
   const startTime = Date.now();
   const timeout = downloadTimeoutSeconds * 1000; // Convert to ms
+  const deadline = startTime + timeout;
   const interval = downloadPollIntervalSeconds * 1000;
   const allowAnyImageAfterMs = Math.min(
     downloadTimeoutSeconds * 1000,
@@ -333,8 +334,10 @@ async function waitForDownloadAndRename(
   );
   let allowAnyImageLogged = false;
 
-  while (Date.now() - startTime < timeout) {
-    await new Promise((r) => setTimeout(r, interval));
+  while (Date.now() < deadline) {
+    const pollRemainingMs = deadline - Date.now();
+    if (pollRemainingMs <= 0) break;
+    await new Promise((r) => setTimeout(r, Math.min(interval, pollRemainingMs)));
 
     let newFile: string | null = null;
     const elapsedMs = Date.now() - startTime;
@@ -364,14 +367,14 @@ async function waitForDownloadAndRename(
       let lastSize = 0;
       let stableCount = 0;
       const stabilizationStart = Date.now();
-      const stabilizationTimeoutMs = timeout;
 
       while (stableCount < 3) {
-        const stabilizationElapsed = Date.now() - stabilizationStart;
-        if (stabilizationElapsed >= stabilizationTimeoutMs) {
+        const totalRemainingMs = deadline - Date.now();
+        if (totalRemainingMs <= 0) {
+          const totalElapsed = Date.now() - startTime;
           console.error(
             `[Background] Timeout waiting for file stabilization: ${newFile} (${Math.round(
-              stabilizationElapsed / 1000
+              totalElapsed / 1000
             )}s)`
           );
           return {
@@ -382,7 +385,10 @@ async function waitForDownloadAndRename(
         }
 
         await new Promise((r) =>
-          setTimeout(r, downloadStabilityIntervalSeconds * 1000)
+          setTimeout(
+            r,
+            Math.min(downloadStabilityIntervalSeconds * 1000, totalRemainingMs)
+          )
         );
         try {
           const fileHandle = await sourceHandle.getFileHandle(newFile);

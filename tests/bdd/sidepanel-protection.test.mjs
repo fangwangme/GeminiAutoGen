@@ -1,13 +1,12 @@
 import assert from "node:assert";
 import { test, describe, it } from "node:test";
 import { createBddIt } from "./_bddSteps.mjs";
+import { shouldCreatePlaceholder } from "../../src/utils/placeholderPolicy.js";
 
 const bddIt = createBddIt(it);
 
 describe("Sidepanel Workflow Logic", () => {
   describe("Window Protection (Placeholder Tab)", () => {
-    const shouldCreatePlaceholder = (tabsCount) => tabsCount <= 1;
-
     bddIt("Given a window with only 1 tab (the Gemini tab), " +
           "When recreating the tab, " +
           "Then it should identify that a placeholder is needed", () => {
