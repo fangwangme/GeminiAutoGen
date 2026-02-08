@@ -10,7 +10,6 @@ const FOLDER_ERROR_FRAGMENTS = [
 ];
 
 const DOWNLOAD_ERROR_FRAGMENTS = [
-  "download",
   "rename",
   "waiting for file",
   "timeout waiting for download"

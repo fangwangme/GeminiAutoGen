@@ -214,6 +214,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   let failedCount = 0;
   let consecutiveFailureCount = 0;
   let nextTaskMode: TaskRunMode = "full";
+  let shouldClearLogBeforeNextTask = false;
 
   const refreshDynamicLabels = () => {
     if (loadedTasks.length > 0) {
@@ -714,9 +715,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     nextTaskMode = "full";
     lastLogTaskIndex = currentIndex;
     
-    // Clear logs for each new task to keep it clean
-    clearLogOutput();
-    
     const total = taskQueue.length;
 
     // Get safe filename for display
@@ -891,6 +889,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         skippedCount += 1;
       }
       consecutiveFailureCount = 0;
+      shouldClearLogBeforeNextTask = true;
       currentIndex++;
 
       // Update remaining time estimate after each task completes
@@ -1001,6 +1000,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     if (!isRunning) return;
+
+    if (shouldClearLogBeforeNextTask) {
+      clearLogOutput();
+      shouldClearLogBeforeNextTask = false;
+    }
 
     // Process next task
     processNextTask();

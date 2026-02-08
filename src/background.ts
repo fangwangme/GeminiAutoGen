@@ -308,7 +308,7 @@ async function waitForDownloadAndRename(
   }
 
   console.log(
-    `[Background] Waiting for new Gemini image to rename as: ${targetFilename}`
+    `[Background] Waiting for new Gemini image to rename as: ${targetFilename} (Timeout: ${downloadTimeoutSeconds}s, Poll: ${downloadPollIntervalSeconds}s)`
   );
 
   // 1. Get initial file list (before download)
@@ -363,8 +363,24 @@ async function waitForDownloadAndRename(
       // 3. Wait for file size to stabilize (download complete)
       let lastSize = 0;
       let stableCount = 0;
+      const stabilizationStart = Date.now();
+      const stabilizationTimeoutMs = timeout;
 
       while (stableCount < 3) {
+        const stabilizationElapsed = Date.now() - stabilizationStart;
+        if (stabilizationElapsed >= stabilizationTimeoutMs) {
+          console.error(
+            `[Background] Timeout waiting for file stabilization: ${newFile} (${Math.round(
+              stabilizationElapsed / 1000
+            )}s)`
+          );
+          return {
+            success: false,
+            error: t("errors.timeoutWaitingDownload"),
+            errorType: "download"
+          };
+        }
+
         await new Promise((r) =>
           setTimeout(r, downloadStabilityIntervalSeconds * 1000)
         );
@@ -377,6 +393,13 @@ async function waitForDownloadAndRename(
           } else {
             stableCount = 0;
             lastSize = file.size;
+          }
+          if (stableCount === 0) {
+            console.log(
+              `[Background] Waiting file stabilize: ${newFile}, size=${file.size}, elapsed=${Math.round(
+                (Date.now() - stabilizationStart) / 1000
+              )}s`
+            );
           }
         } catch {
           console.log("[Background] File not ready yet...");

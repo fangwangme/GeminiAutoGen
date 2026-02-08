@@ -51,31 +51,19 @@ const validateLockedConversationUrl = (
 
 // Inline historyLoadGate logic to avoid code splitting in injected script
 const evaluateHistoryImageWait = ({
-  hasHistory,
   hasAnyImage,
-  lastImageLoaded,
-  elapsedMs,
-  graceMs
+  lastImageLoaded
 }: {
-  hasHistory: boolean;
   hasAnyImage: boolean;
   lastImageLoaded: boolean;
-  elapsedMs: number;
-  graceMs: number;
 }) => {
-  if (!hasHistory) {
-    return { shouldWait: false, reason: "no-history" };
+  if (!hasAnyImage) {
+    return { shouldWait: true, reason: "waiting-last-image-appear" };
   }
-  if (hasAnyImage) {
-    if (lastImageLoaded) {
-      return { shouldWait: false, reason: "last-image-ready" };
-    }
-    return { shouldWait: true, reason: "waiting-last-image" };
+  if (!lastImageLoaded) {
+    return { shouldWait: true, reason: "waiting-last-image-loaded" };
   }
-  if (elapsedMs >= graceMs) {
-    return { shouldWait: false, reason: "history-no-image" };
-  }
-  return { shouldWait: true, reason: "waiting-image-appear" };
+  return { shouldWait: false, reason: "last-image-loaded" };
 };
 
 type Language = "en" | "zh";
@@ -194,6 +182,7 @@ type TaskMode = "full" | "download-only";
 
 type ContentSettings = {
   settings_generationTimeout?: number;
+  settings_downloadTimeout?: number;
   settings_pageLoadTimeout?: number;
   settings_inputTimeout?: number;
   settings_stepDelay?: number;
@@ -283,6 +272,7 @@ const logError = (message: string, data?: unknown) =>
   // 0. Load Settings
   const settings = await storageGet<ContentSettings>([
     "settings_generationTimeout",
+    "settings_downloadTimeout",
     "settings_pageLoadTimeout",
     "settings_inputTimeout",
     "settings_stepDelay",
@@ -292,6 +282,7 @@ const logError = (message: string, data?: unknown) =>
     "settings_generationPollInterval"
   ]);
   const CONFIG_GEN_TIMEOUT = (settings.settings_generationTimeout || 120) * 1000;
+  const CONFIG_DOWNLOAD_TIMEOUT = (settings.settings_downloadTimeout || 120) * 1000;
   const CONFIG_STABILITY_TIMEOUT =
     (settings.settings_pageLoadTimeout || 30) * 1000;
   const CONFIG_INPUT_TIMEOUT = (settings.settings_inputTimeout || 5) * 1000;
@@ -318,6 +309,7 @@ const logError = (message: string, data?: unknown) =>
 
   logInfo("[Content] Timing config", {
     generationTimeoutMs: CONFIG_GEN_TIMEOUT,
+    downloadTimeoutMs: CONFIG_DOWNLOAD_TIMEOUT,
     pageLoadTimeoutMs: CONFIG_STABILITY_TIMEOUT,
     inputTimeoutMs: CONFIG_INPUT_TIMEOUT,
     stepDelayMs: CONFIG_STEP_DELAY,
@@ -335,14 +327,16 @@ const logError = (message: string, data?: unknown) =>
     checkInterval = CONFIG_POLL,
     errorMessage = "Timeout"
   ) => {
-    const end = Date.now() + timeout;
+    const start = Date.now();
+    const end = start + timeout;
     while (Date.now() < end) {
       if (await conditionFn()) return true;
       const remaining = end - Date.now();
       if (remaining <= 0) break;
       await wait(Math.min(checkInterval, remaining));
     }
-    throw new Error(errorMessage);
+    const actualElapsed = Math.round((Date.now() - start) / 1000);
+    throw new Error(`${errorMessage} (waited ${actualElapsed}s, limit ${Math.round(timeout / 1000)}s)`);
   };
 
   function updateStatus(text: string, isError = false) {
@@ -371,33 +365,24 @@ const logError = (message: string, data?: unknown) =>
   }
 
   function getResponseReadyState(container: Element) {
-    const busyElement = container.querySelector<HTMLElement>("[aria-busy]");
-    const ariaBusy = busyElement?.getAttribute("aria-busy") || "";
+    const ariaBusyAttr = container.querySelector("[aria-busy]")?.getAttribute("aria-busy");
+    const ariaBusy = ariaBusyAttr === "true";
     
-    // Check for actual loading indicators, NOT ".processing-state-visible" 
-    // which is a persistent UI class that stays even after generation is done
-    const footer = container.querySelector<HTMLElement>(".response-footer");
-    const footerComplete = footer ? footer.classList.contains("complete") : null;
-    const loader = container.querySelector<HTMLElement>(".generated-image .loader");
-    const hasVisibleLoader = loader ? isVisible(loader) : false;
+    const footer = container.querySelector(".response-footer");
+    const footerComplete = footer ? footer.classList.contains("complete") : false;
     
-    // Check if there's an image with the "loaded" class (Gemini's indicator for ready images)
-    const loadedImage = container.querySelector<HTMLImageElement>('img.loaded');
-    const hasLoadedImage = loadedImage !== null;
+    const loader = container.querySelector(".loader, .loading-spinner");
+    const hasVisibleLoader = loader ? isVisible(loader as HTMLElement) : false;
     
-    // Ready when:
-    // 1. Not aria-busy
-    // 2. Footer is complete (if exists)
-    // 3. No visible loader
-    // 4. Has a loaded image OR footer is complete
-    const ready =
-      ariaBusy !== "true" &&
-      (footerComplete !== false) &&
-      !hasVisibleLoader &&
-      (hasLoadedImage || footerComplete === true);
+    const hasLoadedImage = container.querySelector("img.loaded") !== null;
+
+    // Some Gemini layouts keep unrelated loaders in DOM even when generation is complete.
+    // Completion signals (footer/image) should take precedence over loader presence.
+    const ready = !ariaBusy && (footerComplete || hasLoadedImage);
+
     return {
       ready,
-      ariaBusy,
+      ariaBusy: ariaBusy ? "true" : "false",
       footerComplete,
       hasVisibleLoader,
       hasLoadedImage
@@ -693,7 +678,8 @@ const logError = (message: string, data?: unknown) =>
 
   function getDownloadBtns(
     includeHidden = false,
-    root: ParentNode = document
+    root: ParentNode = document,
+    includeDisabled = false
   ) {
     const selectors = [
       'button[aria-label="Download full size image"]',
@@ -711,21 +697,30 @@ const logError = (message: string, data?: unknown) =>
         .forEach((btn) => buttons.add(btn));
     }
     return Array.from(buttons).filter(
-      (btn) => (includeHidden || isVisible(btn)) && isButtonEnabled(btn)
+      (btn) =>
+        (includeHidden || isVisible(btn)) &&
+        (includeDisabled || isButtonEnabled(btn))
     );
+  }
+
+  function isImageLoaded(img: HTMLImageElement) {
+    if (!img) return false;
+    // Check for explicit 'loaded' class used by Gemini
+    if (img.classList.contains("loaded")) return true;
+    return img.complete && img.naturalWidth > 0;
   }
 
   function getGeneratedImageCandidates(root: ParentNode = document) {
     return Array.from(
       root.querySelectorAll<HTMLImageElement>(
-        'img[src*="blob:"], img[src*="googleusercontent"], img[alt*="Generated"]'
+        'img[src*="blob:"], img[src*="googleusercontent"], img[alt*="Generated"], generated-image img, single-image img'
       )
     );
   }
 
   function getGeneratedImages(root: ParentNode = document) {
     return getGeneratedImageCandidates(root).filter(
-      (img) => isVisible(img) && img.width > 100
+      (img) => isVisible(img) && isImageLoaded(img) && img.width > 100
     );
   }
 
@@ -741,7 +736,7 @@ const logError = (message: string, data?: unknown) =>
   function getConversationContainer(anchor: Element | null) {
     if (!anchor) return null;
     const container = anchor.closest<HTMLElement>(
-      ".conversation-container"
+      ".conversation-container, .response-container, model-response"
     );
     if (container) return container;
     const userQuery = anchor.closest("user-query");
@@ -753,7 +748,7 @@ const logError = (message: string, data?: unknown) =>
 
   function getLastConversationContainer() {
     const containers = document.querySelectorAll<HTMLElement>(
-      ".conversation-container"
+      ".conversation-container, .response-container, model-response"
     );
     if (!containers.length) return null;
     return containers[containers.length - 1] as HTMLElement;
@@ -772,7 +767,7 @@ const logError = (message: string, data?: unknown) =>
    */
   function findConversationByPrompt(promptText: string, nameText: string) {
     const containers = Array.from(
-      document.querySelectorAll<HTMLElement>(".conversation-container")
+      document.querySelectorAll<HTMLElement>(".conversation-container, .response-container, model-response")
     );
     const targetName = normalizeText(nameText).toLowerCase();
     const targetPrompt = normalizeText(promptText).toLowerCase();
@@ -842,7 +837,11 @@ const logError = (message: string, data?: unknown) =>
         'img[src*="blob:"], img[src*="googleusercontent"], img[alt*="Generated"], generated-image img, single-image img'
       )
     );
-    return images.filter((img) => isVisible(img) && isImageLoaded(img) && img.width > 100);
+    return images.filter(
+      (img) =>
+        isImageLoaded(img) &&
+        (img.naturalWidth > 100 || img.width > 100)
+    );
   }
 
   /**
@@ -857,11 +856,14 @@ const logError = (message: string, data?: unknown) =>
       'button[aria-label*="Download"]',
       'button[mattooltip*="Download"]'
     ];
+    let fallback: HTMLButtonElement | null = null;
     for (const selector of selectors) {
       const btn = container.querySelector<HTMLButtonElement>(selector);
-      if (btn && isButtonEnabled(btn)) return btn;
+      if (!btn) continue;
+      if (!fallback) fallback = btn;
+      if (isButtonEnabled(btn)) return btn;
     }
-    return null;
+    return fallback;
   }
 
   function getResponseContainerForAnchor(anchor: Element | null) {
@@ -947,9 +949,10 @@ const logError = (message: string, data?: unknown) =>
 
   function getDownloadButtonsInContainer(
     container: Element,
-    includeHidden = false
+    includeHidden = false,
+    includeDisabled = false
   ) {
-    return getDownloadBtns(includeHidden, container);
+    return getDownloadBtns(includeHidden, container, includeDisabled);
   }
 
   function getDownloadButtonForImage(image: HTMLImageElement | null) {
@@ -1030,7 +1033,7 @@ const logError = (message: string, data?: unknown) =>
         if (!responseContainer || !responseContainer.isConnected) return false;
         const responseState = getResponseReadyState(responseContainer);
         if (!responseState.ready) return false;
-        const buttons = getDownloadButtonsInContainer(responseContainer, true);
+        const buttons = getDownloadButtonsInContainer(responseContainer, true, true);
         const loadedImages = getLoadedImagesInContainer(responseContainer);
         return buttons.length > 0 && loadedImages.length > 0;
       },
@@ -1039,7 +1042,7 @@ const logError = (message: string, data?: unknown) =>
       t("content.error.timeoutExistingResponse")
     );
 
-    const latestDownloadButtons = getDownloadButtonsInContainer(responseContainer, true);
+    const latestDownloadButtons = getDownloadButtonsInContainer(responseContainer, true, true);
     const latestNewImages = getLoadedImagesInContainer(responseContainer);
 
     return { responseContainer, latestDownloadButtons, latestNewImages };
@@ -1065,11 +1068,11 @@ const logError = (message: string, data?: unknown) =>
       let downloadBtns = latestDownloadButtons.length
         ? latestDownloadButtons
         : responseContainer
-          ? getDownloadButtonsInContainer(responseContainer, true)
+          ? getDownloadButtonsInContainer(responseContainer, true, true)
           : [];
       if (!downloadBtns.length) {
         const fallbackButtons = responseContainer
-          ? getDownloadButtonsInContainer(responseContainer, true)
+          ? getDownloadButtonsInContainer(responseContainer, true, true)
           : [];
         downloadBtns = fallbackButtons;
       }
@@ -1114,10 +1117,21 @@ const logError = (message: string, data?: unknown) =>
     await clickDownloadMenuItem();
 
     updateStatus(t("content.status.waitingForFile"));
-    const renameResult = await runtimeSendMessage<WaitAndRenameResponse>({
-      action: "WAIT_AND_RENAME",
-      targetFilename: filename
-    });
+    const renameResult = await Promise.race([
+      runtimeSendMessage<WaitAndRenameResponse>({
+        action: "WAIT_AND_RENAME",
+        targetFilename: filename
+      }),
+      new Promise<WaitAndRenameResponse>((resolve) => {
+        setTimeout(() => {
+          resolve({
+            success: false,
+            error: t("errors.timeoutWaitingDownload"),
+            errorType: "download"
+          });
+        }, CONFIG_DOWNLOAD_TIMEOUT + Math.max(CONFIG_POLL, CONFIG_STEP_DELAY) * 2);
+      })
+    ]);
 
     if (!renameResult || !renameResult.success) {
       const fallbackType: TaskErrorType = renameResult?.errorType
@@ -1304,63 +1318,61 @@ const logError = (message: string, data?: unknown) =>
 
       logInfo(`[Content] Task started: ${task.name} (mode: ${taskMode})`);
 
-            // 4.5 Wait for history to settle (last image in last conversation)
-            const containers = document.querySelectorAll(".conversation-container");
-            const hasHistory = containers.length > 0;
-            
-            const lastConversation = hasHistory ? getLastConversationContainer() : null;
-            const historyImages = lastConversation ? getGeneratedImageCandidates(lastConversation) : [];
-            
-            logInfo(`[Content] History check: hasHistory=${hasHistory}, containers=${containers.length}, lastConvImages=${historyImages.length}`);
-            
-            if (hasHistory) {
-              // If the last conversation clearly has no images after a short wait, don't block
-              logInfo(`[Content] Waiting for history images to settle...`);        const stabilityTimeout = CONFIG_STABILITY_TIMEOUT;
-        const stabilityStart = Date.now();
-        let lastReportTime = 0;
+      // 4.5 Wait for history to settle (last image in last conversation)
+      const containers = document.querySelectorAll(
+        ".conversation-container, .response-container, model-response"
+      );
+      const hasHistory = containers.length > 0;
 
-        while (true) {
-          const elapsedMs = Date.now() - stabilityStart;
-          if (elapsedMs > stabilityTimeout) {
-            const timeoutSeconds = Math.round(stabilityTimeout / 1000);
-            throw new Error(
-              t("content.error.pageStabilityTimeout", {
-                seconds: timeoutSeconds
-              })
-            );
-          }
+      const lastConversation = hasHistory ? getLastConversationContainer() : null;
+      const historyImages = lastConversation
+        ? getGeneratedImageCandidates(lastConversation)
+        : [];
 
-          const lastConversation = getLastConversationContainer();
-          const lastImage = getLastGeneratedImageInConversation(lastConversation);
-          const hasAnyImage = Boolean(lastImage);
-          const lastImageLoaded =
-            !!lastImage &&
-            isImageLoaded(lastImage) &&
-            (lastImage.naturalWidth > 100 || lastImage.width > 100);
+      logInfo(
+        `[Content] History check: hasHistory=${hasHistory}, containers=${containers.length}, lastConvImages=${historyImages.length}`
+      );
 
-          const waitDecision = evaluateHistoryImageWait({
-            hasHistory,
-            hasAnyImage,
-            lastImageLoaded,
-            elapsedMs,
-            graceMs: CONFIG_STABILITY_GRACE
-          });
+      logInfo("[Content] Waiting for history images to settle...");
+      const stabilityTimeout = CONFIG_STABILITY_TIMEOUT * 2;
+      const stabilityStart = Date.now();
+      let lastReportTime = 0;
 
-          if (!waitDecision.shouldWait) {
-            logInfo(`[Content] History ready: ${waitDecision.reason}`);
-            break;
-          }
-
-          // Log every 2 seconds while waiting
-          if (Date.now() - lastReportTime > 2000) {
-            logInfo(`[Content] Still waiting: ${waitDecision.reason} (${Math.round(elapsedMs / 1000)}s)`);
-            lastReportTime = Date.now();
-          }
-
-          await wait(CONFIG_STEP_DELAY);
+      while (true) {
+        const elapsedMs = Date.now() - stabilityStart;
+        if (elapsedMs > stabilityTimeout) {
+          const timeoutSeconds = Math.round(stabilityTimeout / 1000);
+          throw new Error(
+            t("content.error.pageStabilityTimeout", {
+              seconds: timeoutSeconds
+            })
+          );
         }
-      } else {
-        logInfo("[Content] No history detected, proceeding");
+
+        const lastConversation = getLastConversationContainer();
+        const lastImage = getLastGeneratedImageInConversation(lastConversation);
+        const hasAnyImage = Boolean(lastImage);
+        const lastImageLoaded =
+          !!lastImage &&
+          isImageLoaded(lastImage) &&
+          (lastImage.naturalWidth > 100 || lastImage.width > 100);
+
+        const waitDecision = evaluateHistoryImageWait({ hasAnyImage, lastImageLoaded });
+
+        if (!waitDecision.shouldWait) {
+          logInfo(`[Content] History ready: ${waitDecision.reason}`);
+          break;
+        }
+
+        // Log every 2 seconds while waiting
+        if (Date.now() - lastReportTime > 2000) {
+          logInfo(
+            `[Content] Still waiting: ${waitDecision.reason} (${Math.round(elapsedMs / 1000)}s, hasImage=${hasAnyImage}, loaded=${lastImageLoaded})`
+          );
+          lastReportTime = Date.now();
+        }
+
+        await wait(CONFIG_STEP_DELAY);
       }
     } catch (initErr) {
       logError("[Content] Critical error during history wait initialization", {
@@ -1602,73 +1614,112 @@ const logError = (message: string, data?: unknown) =>
     let latestNewImages: HTMLImageElement[] = [];
     let responseBaselineSrcs = new Set<string>();
     let baselineReady = false;
+    let noProgressSince = Date.now();
+    const noProgressTimeoutMs = Math.min(
+      CONFIG_GEN_TIMEOUT,
+      Math.max(CONFIG_STABILITY_TIMEOUT, 15000)
+    );
     
     // Track which container we're using - must be a NEW container (different ID from before send)
     let conversationMatch: { container: HTMLElement; userQuery: HTMLElement } | null = null;
     let confirmedNewContainerId: string | null = null;
     
     try {
+      let lastPollLogTime = Date.now();
       await waitFor(
         () => {
           pollTick += 1;
+          const now = Date.now();
+          const shouldLog = now - lastPollLogTime >= 5000;
+          if (shouldLog) lastPollLogTime = now;
           
-          // Find conversation by prompt/name - but ONLY accept containers that are NEW
-          // (i.e., have a different ID than the last container before we sent the prompt)
-          if (!conversationMatch || !confirmedNewContainerId) {
+          // Find or refresh conversation by prompt/name.
+          // When container has no stable ID, keep refreshing so we don't get stuck on the wrong match.
+          {
             const match = findConversationByPrompt(task.prompt, filename);
             if (match) {
               const matchId = match.container.id || "";
-              
-              // Check if this is a NEW container (different from before send)
-              const isNewContainer = !lastContainerIdBeforeSend || matchId !== lastContainerIdBeforeSend;
-              
-              if (isNewContainer && matchId) {
-                // Confirm this is our new container
-                if (confirmedNewContainerId && confirmedNewContainerId !== matchId) {
-                  // Container ID changed again - reset baseline
+              const isDifferentId =
+                matchId &&
+                lastContainerIdBeforeSend &&
+                matchId !== lastContainerIdBeforeSend;
+              const isNewlyCreated =
+                !lastContainerIdBeforeSend || isDifferentId || !matchId;
+
+              if (isNewlyCreated) {
+                const shouldAdopt =
+                  !conversationMatch ||
+                  conversationMatch.container !== match.container ||
+                  (!confirmedNewContainerId && !!matchId);
+                if (shouldAdopt) {
+                  conversationMatch = match;
+                  confirmedNewContainerId = matchId || null;
                   responseBaselineSrcs = new Set<string>();
                   baselineReady = false;
+                  noProgressSince = Date.now();
+                  if (matchId) {
+                    logInfo(`[Content] Target container identified by ID: ${matchId}`);
+                  } else if (!confirmedNewContainerId) {
+                    logInfo("[Content] Target container identified by position (no ID)");
+                  }
                 }
-                
-                confirmedNewContainerId = matchId;
-                conversationMatch = match;
               }
             }
           }
           
-          const globalButtons = getDownloadBtns(true);
-          const globalImages = getGeneratedImages().filter(
-            (img) => isImageLoaded(img)
-          );
-          const hasNewGlobalContent =
-            globalButtons.length > initialGlobalDownloadBtnCount ||
-            globalImages.length > initialGlobalImageCount;
           const resolvedContainer = resolveResponseContainer();
           if (resolvedContainer && resolvedContainer !== responseContainer) {
             responseContainer = resolvedContainer;
             responseBaselineSrcs = new Set<string>();
             baselineReady = false;
           }
-          if (responseContainer && !responseContainer.isConnected) {
-            responseContainer = null;
-          }
           
-          // Prefer conversation container found by prompt/name
           const targetContainer = conversationMatch?.container || responseContainer;
           
           if (!targetContainer) {
+            if (shouldLog) logInfo("[Content] Still searching for response container...");
             return false;
           }
+
+          const responseState = getResponseReadyState(targetContainer);
+
+          if (shouldLog) {
+            logInfo("[Content] Generation poll status", {
+              tick: pollTick,
+              isReady: responseState.ready,
+              ariaBusy: responseState.ariaBusy,
+              footerComplete: responseState.footerComplete,
+              hasVisibleLoader: responseState.hasVisibleLoader,
+              hasLoadedImage: responseState.hasLoadedImage,
+              baselineReady
+            });
+          }
+
+          const hasProgressSignal =
+            responseState.ariaBusy === "true" ||
+            responseState.footerComplete ||
+            responseState.hasLoadedImage;
+          if (hasProgressSignal) {
+            noProgressSince = now;
+          } else if (now - noProgressSince >= noProgressTimeoutMs) {
+            throw new TaskError(
+              `${t("content.error.timeoutDownloadButton")} (no progress for ${Math.round(
+                noProgressTimeoutMs / 1000
+              )}s)`,
+              "generation"
+            );
+          }
+
+          if (!responseState.ready) {
+            return false;
+          }
+
           if (!baselineReady) {
             getGeneratedImageCandidates(targetContainer).forEach((img) => {
               const src = getImageSrc(img);
               if (src) responseBaselineSrcs.add(src);
             });
             baselineReady = true;
-          }
-          const responseState = getResponseReadyState(targetContainer);
-          if (!responseState.ready) {
-            return false;
           }
           
           // Use new helper to get loaded images in container
@@ -1680,7 +1731,7 @@ const logError = (message: string, data?: unknown) =>
           let scopedLargeImages: HTMLImageElement[] = [];
           let scopedImages: HTMLImageElement[] = [];
           let scopedLoadedImages: HTMLImageElement[] = [];
-          scopedButtons = getDownloadButtonsInContainer(targetContainer, true);
+          scopedButtons = getDownloadButtonsInContainer(targetContainer, true, true);
           scopedImageCandidates = getGeneratedImageCandidates(targetContainer);
           scopedVisibleImages = scopedImageCandidates.filter((img) => isVisible(img));
           scopedLargeImages = scopedVisibleImages.filter((img) => img.width > 100);
@@ -1700,6 +1751,11 @@ const logError = (message: string, data?: unknown) =>
             (responseBaselineSrcs.size === 0 && scopedLoadedImages.length > 0) ||
             loadedImages.length > 0;
           latestNewImages = newImages.length > 0 ? newImages : loadedImages;
+          const hasGenerationOutputSignal =
+            hasNewImage ||
+            scopedImageCandidates.length > 0 ||
+            responseState.footerComplete ||
+            responseState.hasLoadedImage;
           
           // Also try to get download button via new helper
           const directDownloadBtn = getDownloadButtonInConversation(targetContainer);
@@ -1708,7 +1764,7 @@ const logError = (message: string, data?: unknown) =>
             latestDownloadButtons = scopedButtons;
           }
           
-          if (scopedButtons.length > 0 && hasNewImage) {
+          if (scopedButtons.length > 0 && hasGenerationOutputSignal) {
             latestDownloadButtons = scopedButtons;
             // Update responseContainer for later use
             if (conversationMatch) {
@@ -1727,6 +1783,10 @@ const logError = (message: string, data?: unknown) =>
       if (stopBtn && isButtonEnabled(stopBtn)) {
         stopBtn.click();
         await wait(Math.max(200, CONFIG_STEP_DELAY));
+      }
+      const message = toErrorMessage(err);
+      if (message.includes(t("content.error.timeoutDownloadButton"))) {
+        throw new TaskError(message, "generation");
       }
       throw err;
     }
