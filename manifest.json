@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Gemini Auto Image Generator",
+  "name": "Nano Banana Image Generator",
   "version": "4.10.6",
   "description": "Auto generate & download high-res images from Gemini with precise control",
   "permissions": [
@@ -19,7 +19,7 @@
     }
   ],
   "action": {
-    "default_title": "Open Gemini AutoGen"
+    "default_title": "Open Nano Banana Image Generator"
   },
   "side_panel": {
     "default_path": "sidepanel.html"

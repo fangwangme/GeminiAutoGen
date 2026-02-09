@@ -1,4 +1,4 @@
-# Gemini Auto Image Generator
+# Nano Banana Image Generator
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 

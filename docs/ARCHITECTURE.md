@@ -1,4 +1,4 @@
-# GeminiAutoGen Architecture
+# Nano Banana Image Generator Architecture
 
 This is the high-level architecture overview.
 For detailed logic, use `docs/README.md` as the entry index.

@@ -66,7 +66,7 @@ import {
 let t = defaultContentTranslator();
 const { logInfo, logWarn, logError } = createContentLogger(runtimeSendMessage);
 
-// --- Gemini AutoGen Content Script (Single Task Mode) ---
+// --- Nano Banana Image Generator Content Script (Single Task Mode) ---
 // This script processes ONE task and then signals completion
 
 (async function () {
