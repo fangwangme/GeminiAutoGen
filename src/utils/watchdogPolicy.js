@@ -12,5 +12,5 @@ export const computeTaskWatchdogTimeoutMs = (taskMode, settings = {}) => {
 
   return taskMode === "download-only"
     ? downloadMs + safetyMs
-    : generationMs + safetyMs;
+    : generationMs + downloadMs + safetyMs;
 };

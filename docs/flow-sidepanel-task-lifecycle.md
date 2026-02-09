@@ -61,6 +61,7 @@ Content script then returns completion/error via runtime messages that carry `ta
 - `TASK_COMPLETE`
   - reject stale messages by `taskIndex` / `taskRunSeq`
   - if `skipped=false`, verify output with `CHECK_FILE_EXISTS` before accepting completion
+  - verification has a hard timeout (`10s`); timeout is treated as `download` error
   - if verification fails, convert to `download` error and route retry policy
   - if verification passes, clear retry and advance queue
 - `TASK_ERROR`

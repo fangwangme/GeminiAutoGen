@@ -214,20 +214,8 @@
 
             <div class="form-group">
                 <label for="downloadTimeout" data-i18n="options.timing.downloadTimeout.label">Download Wait Timeout (seconds)</label>
-                <div class="help-text" data-i18n="options.timing.downloadTimeout.help">Max wait time for content-level download response checks (Default: 120).</div>
+                <div class="help-text" data-i18n="options.timing.downloadTimeout.help">Max total wait time after clicking download, including detect/stabilize/rename (Default: 120).</div>
                 <input type="number" id="downloadTimeout" min="30" value="120">
-            </div>
-
-            <div class="form-group">
-                <label for="downloadDetectTimeout" data-i18n="options.timing.downloadDetectTimeout.label">Download Detect Timeout (seconds)</label>
-                <div class="help-text" data-i18n="options.timing.downloadDetectTimeout.help">Max wait time to detect a new image file in source folder (Default: 120).</div>
-                <input type="number" id="downloadDetectTimeout" min="30" value="120">
-            </div>
-
-            <div class="form-group">
-                <label for="downloadStabilityTimeout" data-i18n="options.timing.downloadStabilityTimeout.label">Download Stabilization Timeout (seconds)</label>
-                <div class="help-text" data-i18n="options.timing.downloadStabilityTimeout.help">Max wait time for detected file size to stabilize (Default: 120).</div>
-                <input type="number" id="downloadStabilityTimeout" min="30" value="120">
             </div>
 
             <div class="form-group">

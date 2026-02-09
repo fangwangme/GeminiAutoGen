@@ -105,6 +105,7 @@ export function createTaskLifecycle(deps: TaskLifecycleDeps) {
   } = deps;
   let activeTaskRunSeq = 0;
   let taskWatchdogTimer: number | undefined;
+  const completionVerifyTimeoutMs = 10000;
 
   const clearTaskWatchdog = () => {
     if (taskWatchdogTimer) {
@@ -125,6 +126,26 @@ export function createTaskLifecycle(deps: TaskLifecycleDeps) {
     ]);
     return computeTaskWatchdogTimeoutMs(taskMode, settings);
   };
+
+  const withTimeout = async <T>(
+    promise: Promise<T>,
+    timeoutMs: number,
+    timeoutMessage: string
+  ): Promise<T> =>
+    new Promise<T>((resolve, reject) => {
+      const timerId = window.setTimeout(() => {
+        reject(new Error(timeoutMessage));
+      }, timeoutMs);
+      promise
+        .then((value) => {
+          window.clearTimeout(timerId);
+          resolve(value);
+        })
+        .catch((error) => {
+          window.clearTimeout(timerId);
+          reject(error);
+        });
+    });
 
   async function processNextTask() {
     if (!state.isRunning) return;
@@ -553,10 +574,14 @@ export function createTaskLifecycle(deps: TaskLifecycleDeps) {
         return;
       }
       const expectedFilename = toSafeTaskFilename(task.name);
-      void runtimeSendMessage<CheckFileExistsResponse>({
-        action: "CHECK_FILE_EXISTS",
-        filename: expectedFilename
-      })
+      void withTimeout(
+        runtimeSendMessage<CheckFileExistsResponse>({
+          action: "CHECK_FILE_EXISTS",
+          filename: expectedFilename
+        }),
+        completionVerifyTimeoutMs,
+        `Post-check timeout after ${Math.round(completionVerifyTimeoutMs / 1000)}s for ${expectedFilename}`
+      )
         .then((verifyResult) => {
           if (verifyResult?.error) {
             void handleTaskError(verifyResult.error, verifyResult.errorType);

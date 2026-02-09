@@ -35,15 +35,7 @@ const translations: Record<Language, Record<string, string>> = {
     "options.timing.downloadTimeout.label":
       "Download Response Timeout (seconds)",
     "options.timing.downloadTimeout.help":
-      "Max wait time for content-level download response checks (Default: 120).",
-    "options.timing.downloadDetectTimeout.label":
-      "Download Detect Timeout (seconds)",
-    "options.timing.downloadDetectTimeout.help":
-      "Max wait time to detect a new image file in source folder (Default: 120).",
-    "options.timing.downloadStabilityTimeout.label":
-      "Download Stabilization Timeout (seconds)",
-    "options.timing.downloadStabilityTimeout.help":
-      "Max wait time for detected file size to stabilize (Default: 120).",
+      "Max total wait time after clicking download, including detect/stabilize/rename (Default: 120).",
     "options.timing.pageLoadTimeout.label": "Page Load / Stability (seconds)",
     "options.timing.pageLoadTimeout.help":
       "Wait for page load or stability (Default: 30).",
@@ -203,13 +195,7 @@ const translations: Record<Language, Record<string, string>> = {
     "options.timing.generationTimeout.help": "图片生成最大等待时间（默认：120）。",
     "options.timing.downloadTimeout.label": "下载响应超时（秒）",
     "options.timing.downloadTimeout.help":
-      "内容脚本下载响应检查最大等待时间（默认：120）。",
-    "options.timing.downloadDetectTimeout.label": "下载检测超时（秒）",
-    "options.timing.downloadDetectTimeout.help":
-      "在源目录检测新图片文件的最大等待时间（默认：120）。",
-    "options.timing.downloadStabilityTimeout.label": "下载稳定化超时（秒）",
-    "options.timing.downloadStabilityTimeout.help":
-      "检测到文件后等待其大小稳定的最大时间（默认：120）。",
+      "点击下载后的总等待时间，覆盖检测/稳定化/重命名全过程（默认：120）。",
     "options.timing.pageLoadTimeout.label": "页面加载/稳定等待（秒）",
     "options.timing.pageLoadTimeout.help": "等待页面加载或稳定（默认：30）。",
     "options.timing.inputTimeout.label": "输入框超时（秒）",

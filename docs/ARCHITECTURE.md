@@ -79,9 +79,7 @@ User-configurable settings are stored in extension local storage.
 
 Primary defaults:
 - generation timeout: `120s`
-- download response timeout (content race guard): `120s`
-- download detect timeout (background poll phase): `120s`
-- download stabilization timeout (background stabilize phase): `120s`
+- download timeout (single end-to-end budget after click): `120s`
 - page stability timeout: `30s`
 - input timeout: `5s`
 - step delay: `1s`
@@ -90,9 +88,10 @@ Primary defaults:
 Behavior:
 - Content/background enforce per-step timeouts.
 - Sidepanel watchdog is a hard fail-safe:
-  - `full`: `generationTimeout + 15s`
+  - `full`: `generationTimeout + downloadTimeout + 15s`
   - `download-only`: `downloadTimeout + 15s`
 - Watchdog timeout marks task failed and proceeds, preventing infinite stuck loops.
+- Non-skipped completion requires file existence post-check (`CHECK_FILE_EXISTS`) with a `10s` hard timeout.
 
 ## Conversation Preconditions
 

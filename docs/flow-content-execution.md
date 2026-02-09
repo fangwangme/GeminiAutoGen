@@ -77,6 +77,9 @@ No-progress timeout triggers `generation` error.
 - reveal/hover/focus/click
 - click menu item for download when needed
 - call background `WAIT_AND_RENAME`
+- use one end-to-end download budget: `settings_downloadTimeout`
+  - content-side response race timeout: `settings_downloadTimeout`
+  - background detect/stabilize/rename: same global `settings_downloadTimeout` deadline
 
 Download response is enforced with race timeout and mapped to `download` or `folder` errors.
 
@@ -87,3 +90,4 @@ Download response is enforced with race timeout and mapped to `download` or `fol
 
 All status/log updates are mirrored through runtime messages for sidepanel visibility.
 Sidepanel performs an additional `CHECK_FILE_EXISTS` verification before accepting non-skipped completion.
+That post-check has a hard `10s` timeout; timeout is classified as `download` error.

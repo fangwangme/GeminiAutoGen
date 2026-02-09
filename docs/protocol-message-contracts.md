@@ -144,7 +144,7 @@ Request:
   message: string;
   data?: unknown;
   source?: string;
-  timestamp: string; // ISO
+  timestamp: string; // local-time string: YYYY-MM-DD HH:mm:ss.SSS GMT±HH:MM
 }
 ```
 
@@ -161,3 +161,4 @@ When sidepanel receives `TASK_COMPLETE(skipped=false)`, it performs `CHECK_FILE_
 
 - if file exists: accept completion
 - if file missing: convert to `download` error and enter retry policy
+- if post-check call times out (`10s`): convert to `download` error and enter retry policy

@@ -26,10 +26,10 @@ This document describes file handling logic in `src/background.ts`.
 4. poll for new file:
    - prefer Gemini naming patterns first
    - after grace window, widen to any new image
-   - timeout source: `settings_downloadDetectTimeout` (fallback: `settings_downloadTimeout`)
+   - bounded by global timeout source: `settings_downloadTimeout`
 5. once detected, wait stabilization:
    - file size must stay stable for multiple ticks
-   - timeout source: `settings_downloadStabilityTimeout` (fallback: `settings_downloadTimeout`)
+   - still bounded by the same global timeout (`settings_downloadTimeout`)
 6. run image checks:
    - 1:1 aspect ratio treated as generation failure
    - optional 16:9 warning check
@@ -45,4 +45,4 @@ This document describes file handling logic in `src/background.ts`.
 ## State Notes
 
 - `lastFileHash` is kept in memory and reset by `RESET_STATE`.
-- all timestamps and events are logged with ISO timestamp prefix.
+- all timestamps and events are logged with local-time timestamp prefix (`YYYY-MM-DD HH:mm:ss.SSS GMT±HH:MM`).

@@ -33,8 +33,6 @@ This document defines extension storage keys, ownership, and defaults.
 
 - `settings_generationTimeout` (default `120`)
 - `settings_downloadTimeout` (default `120`)
-- `settings_downloadDetectTimeout` (default `120`, fallback to `settings_downloadTimeout`)
-- `settings_downloadStabilityTimeout` (default `120`, fallback to `settings_downloadTimeout`)
 - `settings_pageLoadTimeout` (default `30`)
 - `settings_inputTimeout` (default `5`)
 - `settings_stepDelay` (default `1`)
@@ -50,6 +48,11 @@ This document defines extension storage keys, ownership, and defaults.
 - `settings_generationPollInterval`
 - `settings_downloadPollInterval`
 - `settings_downloadStabilityInterval`
+
+## Obsolete Keys (no longer read, removed on save)
+
+- `settings_downloadDetectTimeout`
+- `settings_downloadStabilityTimeout`
 
 ## Reset Semantics
 

@@ -10,20 +10,21 @@ This document defines timeout ownership and retry behavior.
 - input/page waits: `settings_inputTimeout`
 - history settle gate budget: `settings_pageLoadTimeout * 2`
 - send wait budget: `max(inputTimeout, stepDelay * 5)`
-- local download response race timeout: `downloadTimeout + small buffer`
+- local download response race timeout: `settings_downloadTimeout`
 
 ## Background Layer (`src/background.ts`)
 
-- polling phase timeout: `settings_downloadDetectTimeout` (fallback `settings_downloadTimeout`)
-- stabilization phase timeout: `settings_downloadStabilityTimeout` (fallback `settings_downloadTimeout`)
+- `WAIT_AND_RENAME` uses one global deadline: `settings_downloadTimeout`
+- polling + stabilization + rename pipeline must complete within that single budget
 
 ## Sidepanel Layer (`src/sidepanel/taskLifecycle.ts`)
 
 - watchdog hard timeout:
-  - `full`: `generationTimeout + 15s`
+  - `full`: `generationTimeout + downloadTimeout + 15s`
   - `download-only`: `downloadTimeout + 15s`
 - watchdog is fail-safe, not primary business timeout
 - completion consistency guard: non-skipped `TASK_COMPLETE` must pass `CHECK_FILE_EXISTS`, otherwise treated as `download` error
+- completion consistency guard has a hard check timeout (`10s`) to avoid panel-side deadlock
 
 ## Retry Policy
 

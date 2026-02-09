@@ -9,9 +9,9 @@ import {
 const bddIt = createBddIt(it);
 
 describe("Watchdog policy (BDD)", () => {
-  bddIt("Given full mode and defaults, When computing timeout, Then it is generation plus safety", () => {
+  bddIt("Given full mode and defaults, When computing timeout, Then it is generation plus download plus safety", () => {
     const timeoutMs = computeTaskWatchdogTimeoutMs("full", {});
-    assert.equal(timeoutMs, 135000);
+    assert.equal(timeoutMs, 255000);
   });
 
   bddIt("Given download-only mode and defaults, When computing timeout, Then it is download plus safety", () => {
@@ -19,12 +19,12 @@ describe("Watchdog policy (BDD)", () => {
     assert.equal(timeoutMs, 135000);
   });
 
-  bddIt("Given custom generation timeout, When full mode, Then watchdog follows generation budget", () => {
+  bddIt("Given custom generation/download timeout, When full mode, Then watchdog follows combined budget", () => {
     const timeoutMs = computeTaskWatchdogTimeoutMs("full", {
       settings_generationTimeout: 45,
       settings_downloadTimeout: 300
     });
-    assert.equal(timeoutMs, 60000);
+    assert.equal(timeoutMs, 360000);
   });
 
   bddIt("Given watchdog timeout error text, When classifying, Then it is detected", () => {

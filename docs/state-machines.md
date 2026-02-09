@@ -70,4 +70,4 @@ Entry: `WAIT_AND_RENAME`.
 7. `move-rename`
 8. `return-success` / `return-error`
 
-`poll-new-file` and `stabilize-file` each enforce their own timeout budget.
+`poll-new-file` and `stabilize-file` are both bounded by one global timeout budget (`settings_downloadTimeout`).

@@ -313,7 +313,7 @@ const { logInfo, logWarn, logError } = createContentLogger(runtimeSendMessage);
             error: t("errors.timeoutWaitingDownload"),
             errorType: "download"
           });
-        }, CONFIG_DOWNLOAD_TIMEOUT + Math.max(CONFIG_POLL, CONFIG_STEP_DELAY) * 2);
+        }, CONFIG_DOWNLOAD_TIMEOUT);
       })
     ]);
 
