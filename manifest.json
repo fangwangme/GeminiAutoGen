@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Nano Banana Image Generator",
-  "version": "4.10.6",
+  "version": "4.10.7",
   "description": "Auto generate & download high-res images from Gemini with precise control",
   "permissions": [
     "activeTab",
@@ -11,11 +11,18 @@
     "tabs",
     "sidePanel"
   ],
-  "host_permissions": ["https://gemini.google.com/*"],
+  "host_permissions": [
+    "https://gemini.google.com/*"
+  ],
   "web_accessible_resources": [
     {
-      "resources": ["content.js", "chunks/*.js"],
-      "matches": ["https://gemini.google.com/*"]
+      "resources": [
+        "content.js",
+        "chunks/*.js"
+      ],
+      "matches": [
+        "https://gemini.google.com/*"
+      ]
     }
   ],
   "action": {
