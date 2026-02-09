@@ -318,6 +318,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     ensureLockedConversationTab,
     storageGet,
     storageSet,
+    runtimeSendMessage,
     executeScript,
     tabsCreate,
     tabsGet,

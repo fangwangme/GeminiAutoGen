@@ -5,6 +5,7 @@ This folder contains implementation-focused documentation.
 ## Start Here
 
 - `ARCHITECTURE.md`: high-level architecture overview and module map.
+- Operational baseline: use locked existing conversation with at least one generated image (avoid fresh `new conversation` threads for stable runs).
 
 ## Detailed Business Logic
 

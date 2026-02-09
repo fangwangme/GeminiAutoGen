@@ -72,6 +72,8 @@ const { logInfo, logWarn, logError } = createContentLogger(runtimeSendMessage);
 (async function () {
   const language = await getStoredLanguage();
   t = createTranslator(language);
+  let activeTaskIndex: number | undefined;
+  let activeTaskRunSeq: number | undefined;
 
   // 0. Load Settings
   const settings = await storageGet<ContentSettings>([
@@ -146,9 +148,30 @@ const { logInfo, logWarn, logError } = createContentLogger(runtimeSendMessage);
     runtimeSendMessage<void>({
       action: "UPDATE_STATUS",
       status: text,
-      isError
+      isError,
+      taskIndex: activeTaskIndex,
+      taskRunSeq: activeTaskRunSeq
     }).catch(() => {});
   }
+
+  const reportTaskComplete = (skipped: boolean) => {
+    runtimeSendMessage<void>({
+      action: "TASK_COMPLETE",
+      skipped,
+      taskIndex: activeTaskIndex,
+      taskRunSeq: activeTaskRunSeq
+    }).catch(() => {});
+  };
+
+  const reportTaskError = (error: string, errorType?: TaskErrorType) => {
+    runtimeSendMessage<void>({
+      action: "TASK_ERROR",
+      error,
+      errorType,
+      taskIndex: activeTaskIndex,
+      taskRunSeq: activeTaskRunSeq
+    }).catch(() => {});
+  };
 
   async function prepareDownloadOnlyContext(
     task: TaskItem,
@@ -316,17 +339,28 @@ const { logInfo, logWarn, logError } = createContentLogger(runtimeSendMessage);
       currentTask?: TaskItem;
       currentTaskMode?: string;
       lockedConversationUrl?: string;
-    }>(["currentTask", "currentTaskMode", "lockedConversationUrl"]);
+      currentTaskIndex?: number;
+      currentTaskRunSeq?: number;
+    }>([
+      "currentTask",
+      "currentTaskMode",
+      "lockedConversationUrl",
+      "currentTaskIndex",
+      "currentTaskRunSeq"
+    ]);
+    activeTaskIndex =
+      typeof data.currentTaskIndex === "number" ? data.currentTaskIndex : undefined;
+    activeTaskRunSeq =
+      typeof data.currentTaskRunSeq === "number"
+        ? data.currentTaskRunSeq
+        : undefined;
     const task = data.currentTask;
     const taskMode = normalizeTaskMode(data.currentTaskMode);
     const lockedConversationUrl = (data.lockedConversationUrl || "").trim();
 
     if (!task) {
       logInfo("[Content] No task found.");
-      runtimeSendMessage<void>({
-        action: "TASK_ERROR",
-        error: "No task found"
-      });
+      reportTaskError("No task found");
       return;
     }
 
@@ -363,7 +397,7 @@ const { logInfo, logWarn, logError } = createContentLogger(runtimeSendMessage);
           name: task.name
         })
       );
-      runtimeSendMessage<void>({ action: "TASK_COMPLETE", skipped: true });
+      reportTaskComplete(true);
       return;
     }
 
@@ -424,7 +458,7 @@ const { logInfo, logWarn, logError } = createContentLogger(runtimeSendMessage);
           name: task.name
         })
       );
-      runtimeSendMessage<void>({ action: "TASK_COMPLETE", skipped: false });
+      reportTaskComplete(false);
       return;
     }
 
@@ -795,7 +829,7 @@ const { logInfo, logWarn, logError } = createContentLogger(runtimeSendMessage);
         name: task.name
       })
     );
-    runtimeSendMessage<void>({ action: "TASK_COMPLETE", skipped: false });
+    reportTaskComplete(false);
   } catch (err) {
     const message = toErrorMessage(err);
     const errorType: TaskErrorType =
@@ -811,10 +845,6 @@ const { logInfo, logWarn, logError } = createContentLogger(runtimeSendMessage);
       }),
       true
     );
-    runtimeSendMessage<void>({
-      action: "TASK_ERROR",
-      error: message,
-      errorType
-    });
+    reportTaskError(message, errorType);
   }
 })();

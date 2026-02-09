@@ -45,6 +45,8 @@ type WaitAndRenameResult = {
 
 type DownloadSettings = {
   settings_downloadTimeout?: number;
+  settings_downloadDetectTimeout?: number;
+  settings_downloadStabilityTimeout?: number;
   settings_pollInterval?: number;
   settings_downloadPollInterval?: number;
   settings_downloadStabilityInterval?: number;
@@ -271,12 +273,18 @@ async function waitForDownloadAndRename(
   // Get Timeout Setting
   const settings = await storageGet<DownloadSettings>([
     "settings_downloadTimeout",
+    "settings_downloadDetectTimeout",
+    "settings_downloadStabilityTimeout",
     "settings_pollInterval",
     "settings_downloadPollInterval",
     "settings_downloadStabilityInterval"
   ]);
-  const downloadTimeoutSeconds = normalizePositive(
-    settings.settings_downloadTimeout,
+  const downloadDetectTimeoutSeconds = normalizePositive(
+    settings.settings_downloadDetectTimeout ?? settings.settings_downloadTimeout,
+    120
+  );
+  const downloadStabilityTimeoutSeconds = normalizePositive(
+    settings.settings_downloadStabilityTimeout ?? settings.settings_downloadTimeout,
     120
   );
   const downloadPollIntervalSeconds = normalizePositive(
@@ -308,7 +316,7 @@ async function waitForDownloadAndRename(
   }
 
   console.log(
-    `[Background] Waiting for new Gemini image to rename as: ${targetFilename} (Timeout: ${downloadTimeoutSeconds}s, Poll: ${downloadPollIntervalSeconds}s)`
+    `[Background] Waiting for new Gemini image to rename as: ${targetFilename} (DetectTimeout: ${downloadDetectTimeoutSeconds}s, StabilityTimeout: ${downloadStabilityTimeoutSeconds}s, Poll: ${downloadPollIntervalSeconds}s)`
   );
 
   // 1. Get initial file list (before download)
@@ -321,26 +329,26 @@ async function waitForDownloadAndRename(
   console.log(`[Background] Initial image files in source: ${initialFiles.size}`);
 
   // 2. Poll for new file
-  const startTime = Date.now();
-  const timeout = downloadTimeoutSeconds * 1000; // Convert to ms
-  const deadline = startTime + timeout;
+  const pollStartTime = Date.now();
+  const detectTimeoutMs = downloadDetectTimeoutSeconds * 1000; // Convert to ms
   const interval = downloadPollIntervalSeconds * 1000;
   const allowAnyImageAfterMs = Math.min(
-    downloadTimeoutSeconds * 1000,
+    detectTimeoutMs,
     Math.max(
-      Math.round(downloadTimeoutSeconds * 1000 * 0.1),
+      Math.round(detectTimeoutMs * 0.1),
       downloadPollIntervalSeconds * 1000 * 5
     )
   );
   let allowAnyImageLogged = false;
 
-  while (Date.now() < deadline) {
-    const pollRemainingMs = deadline - Date.now();
+  while (Date.now() - pollStartTime < detectTimeoutMs) {
+    const pollElapsedMs = Date.now() - pollStartTime;
+    const pollRemainingMs = detectTimeoutMs - pollElapsedMs;
     if (pollRemainingMs <= 0) break;
     await new Promise((r) => setTimeout(r, Math.min(interval, pollRemainingMs)));
 
     let newFile: string | null = null;
-    const elapsedMs = Date.now() - startTime;
+    const elapsedMs = Date.now() - pollStartTime;
     if (elapsedMs >= allowAnyImageAfterMs && !allowAnyImageLogged) {
       console.log(
         "[Background] No Gemini-named download detected yet; widening search to any new image file."
@@ -367,14 +375,14 @@ async function waitForDownloadAndRename(
       let lastSize = 0;
       let stableCount = 0;
       const stabilizationStart = Date.now();
+      const stabilizationTimeoutMs = downloadStabilityTimeoutSeconds * 1000;
 
       while (stableCount < 3) {
-        const totalRemainingMs = deadline - Date.now();
-        if (totalRemainingMs <= 0) {
-          const totalElapsed = Date.now() - startTime;
+        const stabilizationElapsed = Date.now() - stabilizationStart;
+        if (stabilizationElapsed >= stabilizationTimeoutMs) {
           console.error(
             `[Background] Timeout waiting for file stabilization: ${newFile} (${Math.round(
-              totalElapsed / 1000
+              stabilizationElapsed / 1000
             )}s)`
           );
           return {
@@ -384,10 +392,15 @@ async function waitForDownloadAndRename(
           };
         }
 
+        const stabilizationRemainingMs =
+          stabilizationTimeoutMs - stabilizationElapsed;
         await new Promise((r) =>
           setTimeout(
             r,
-            Math.min(downloadStabilityIntervalSeconds * 1000, totalRemainingMs)
+            Math.min(
+              downloadStabilityIntervalSeconds * 1000,
+              stabilizationRemainingMs
+            )
           )
         );
         try {

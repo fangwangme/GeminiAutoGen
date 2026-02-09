@@ -51,6 +51,7 @@ type TaskLifecycleDeps = {
   ) => Promise<boolean>;
   storageGet: <T>(keys: string[]) => Promise<T>;
   storageSet: (items: Record<string, unknown>) => Promise<void>;
+  runtimeSendMessage: <T>(message: unknown) => Promise<T>;
   executeScript: (
     injection: chrome.scripting.ScriptInjection<unknown[], unknown>
   ) => Promise<chrome.scripting.InjectionResult<unknown>[]>;
@@ -68,6 +69,12 @@ type TimeoutSnapshot = {
   generatedImages: number;
   downloadButtons: number;
   hasInput: boolean;
+};
+
+type CheckFileExistsResponse = {
+  exists: boolean;
+  error?: string;
+  errorType?: TaskErrorType;
 };
 
 export function createTaskLifecycle(deps: TaskLifecycleDeps) {
@@ -89,6 +96,7 @@ export function createTaskLifecycle(deps: TaskLifecycleDeps) {
     ensureLockedConversationTab,
     storageGet,
     storageSet,
+    runtimeSendMessage,
     executeScript,
     tabsCreate,
     tabsGet,
@@ -166,7 +174,12 @@ export function createTaskLifecycle(deps: TaskLifecycleDeps) {
       name: displayName
     });
 
-    await storageSet({ currentTask: task, currentTaskMode: taskMode });
+    await storageSet({
+      currentTask: task,
+      currentTaskMode: taskMode,
+      currentTaskIndex: state.currentIndex,
+      currentTaskRunSeq: currentRunSeq
+    });
 
     clearTaskWatchdog();
     const watchdogTimeoutMs = await getTaskWatchdogTimeoutMs(taskMode);
@@ -468,27 +481,106 @@ export function createTaskLifecycle(deps: TaskLifecycleDeps) {
   }
 
   function handlePanelMessage(request: PanelMessage) {
+    const isTaskScopedMessage =
+      request.action === "TASK_COMPLETE" ||
+      request.action === "TASK_ERROR" ||
+      request.action === "UPDATE_STATUS";
+    if (isTaskScopedMessage) {
+      if (
+        typeof request.taskRunSeq === "number" &&
+        request.taskRunSeq !== activeTaskRunSeq
+      ) {
+        appendLogLine(
+          `[Panel] Ignored stale ${request.action}: runSeq=${request.taskRunSeq}, current=${activeTaskRunSeq}`
+        );
+        return;
+      }
+      if (
+        typeof request.taskIndex === "number" &&
+        request.taskIndex !== state.currentIndex
+      ) {
+        appendLogLine(
+          `[Panel] Ignored stale ${request.action}: taskIndex=${request.taskIndex}, current=${state.currentIndex}`
+        );
+        return;
+      }
+    }
+
     if (request.action === "TASK_COMPLETE") {
       clearTaskWatchdog();
-      console.log(
-        `[Panel] Task ${state.currentIndex + 1} complete (skipped: ${
-          request.skipped
-        })`
-      );
-      state.retryCounts.delete(state.currentIndex);
-      if (request.skipped) {
-        state.skippedCount += 1;
-      }
-      state.consecutiveFailureCount = 0;
-      state.shouldClearLogBeforeNextTask = true;
-      state.currentIndex += 1;
-      updateRemainingTime();
+      const completedTaskIndex = state.currentIndex;
+      const completedRunSeq = activeTaskRunSeq;
+      const finalizeTaskComplete = () => {
+        if (!state.isRunning) return;
+        if (
+          completedTaskIndex !== state.currentIndex ||
+          completedRunSeq !== activeTaskRunSeq
+        ) {
+          appendLogLine(
+            `[Panel] Dropped late TASK_COMPLETE for task ${completedTaskIndex + 1}`
+          );
+          return;
+        }
+        console.log(
+          `[Panel] Task ${state.currentIndex + 1} complete (skipped: ${
+            request.skipped
+          })`
+        );
+        state.retryCounts.delete(state.currentIndex);
+        if (request.skipped) {
+          state.skippedCount += 1;
+        }
+        state.consecutiveFailureCount = 0;
+        state.shouldClearLogBeforeNextTask = true;
+        state.currentIndex += 1;
+        updateRemainingTime();
 
-      if (state.currentIndex < state.taskQueue.length && state.isRunning) {
-        void recreateTab();
-      } else {
-        void processNextTask();
+        if (state.currentIndex < state.taskQueue.length && state.isRunning) {
+          void recreateTab();
+        } else {
+          void processNextTask();
+        }
+      };
+
+      if (request.skipped) {
+        finalizeTaskComplete();
+        return;
       }
+
+      const task = state.taskQueue[state.currentIndex];
+      if (!task) {
+        void handleTaskError("Task completion received with no active task", "generation");
+        return;
+      }
+      const expectedFilename = toSafeTaskFilename(task.name);
+      void runtimeSendMessage<CheckFileExistsResponse>({
+        action: "CHECK_FILE_EXISTS",
+        filename: expectedFilename
+      })
+        .then((verifyResult) => {
+          if (verifyResult?.error) {
+            void handleTaskError(verifyResult.error, verifyResult.errorType);
+            return;
+          }
+          if (!verifyResult?.exists) {
+            appendLogLine(
+              `[Panel] Completion verification failed: missing ${expectedFilename}`
+            );
+            void handleTaskError(
+              `Post-check missing output: ${expectedFilename}`,
+              "download"
+            );
+            return;
+          }
+          finalizeTaskComplete();
+        })
+        .catch((err) => {
+          const message = err instanceof Error ? err.message : String(err);
+          void handleTaskError(
+            `Post-check failed for ${expectedFilename}: ${message}`,
+            "download"
+          );
+        });
       return;
     }
 

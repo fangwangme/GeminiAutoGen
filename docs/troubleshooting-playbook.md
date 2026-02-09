@@ -41,6 +41,7 @@ Typical interpretation:
 ## 4) Common Root Causes
 
 - Locked URL mismatch after tab recreate
+- Using a fresh `new conversation` thread with no prior generated image history
 - Gemini DOM selector change
 - Source/output folder permission loss
 - Download file naming changed and widening logic not catching quickly
@@ -51,10 +52,19 @@ Typical interpretation:
 1. Stop run
 2. Reset in sidepanel
 3. Verify locked URL points to specific conversation
-4. Re-check folder permissions in options
-5. Re-run with small task subset
+4. Prefer a conversation that already has at least one generated image (not a fresh new conversation)
+5. Re-check folder permissions in options
+6. Re-run with small task subset
 
-## 6) What to Capture for Debugging
+## 6) Missing Image After Run
+
+If summary says task completed but output is missing:
+
+1. Confirm logs include `Completion verification failed: missing ...`
+2. Check whether retry policy switched to download-only retries afterward
+3. Validate source/output folders for delayed or failed rename
+
+## 7) What to Capture for Debugging
 
 - full sidepanel log block for one failed task
 - watchdog snapshot line

@@ -19,7 +19,7 @@ State holder: `TaskLifecycleState` in `src/sidepanel/taskLifecycle.ts`.
 1. `idle -> running`
    - trigger: Start button + successful `startRun` pre-flight
 2. `running -> running`
-   - trigger: `TASK_COMPLETE` and more tasks remain
+   - trigger: `TASK_COMPLETE` verified by output existence check and more tasks remain
    - action: increment index, recreate tab, process next
 3. `running -> running`
    - trigger: retry policy action (`retry-download` / `retry-full`)
@@ -31,6 +31,9 @@ State holder: `TaskLifecycleState` in `src/sidepanel/taskLifecycle.ts`.
 6. `running -> running`
    - trigger: watchdog timeout
    - action: mark current failed, advance index
+7. `running -> running`
+   - trigger: stale `TASK_COMPLETE` / `TASK_ERROR` / `UPDATE_STATUS`
+   - action: ignore message by task index/run sequence guard
 
 ## Content Task State Machine
 
@@ -67,4 +70,4 @@ Entry: `WAIT_AND_RENAME`.
 7. `move-rename`
 8. `return-success` / `return-error`
 
-Global deadline bounds polling+stabilization under one timeout budget.
+`poll-new-file` and `stabilize-file` each enforce their own timeout budget.

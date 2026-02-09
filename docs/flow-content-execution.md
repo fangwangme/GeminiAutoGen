@@ -11,7 +11,7 @@ It loads settings and reads the current task from storage.
 
 ## 1) Pre-check
 
-- load current task + task mode + locked URL
+- load current task + task mode + locked URL + `currentTaskIndex` + `currentTaskRunSeq`
 - build safe target filename
 - `CHECK_FILE_EXISTS` to skip already completed outputs
 
@@ -21,8 +21,15 @@ If exists, task reports `TASK_COMPLETE(skipped=true)` immediately.
 
 - validate locked URL format/domain/path
 - assert current page URL matches locked URL before critical actions
+- operational requirement: use an existing conversation with at least one generated image; avoid fresh `new conversation` threads
 
 Any mismatch raises `locked-url` error.
+
+Why this requirement improves stability:
+
+- download-only retry needs an existing response container/download button target
+- history settle logic is more reliable when prior generated-image state exists
+- fresh threads have weaker anchor context and are more prone to mis-targeting/race
 
 ## 3) Page and History Readiness
 
@@ -75,7 +82,8 @@ Download response is enforced with race timeout and mapped to `download` or `fol
 
 ## 8) Completion/Error Reporting
 
-- success -> `TASK_COMPLETE`
-- failure -> `TASK_ERROR` with typed error classification
+- success -> `TASK_COMPLETE` with `taskIndex` + `taskRunSeq`
+- failure -> `TASK_ERROR` with typed error classification + `taskIndex` + `taskRunSeq`
 
 All status/log updates are mirrored through runtime messages for sidepanel visibility.
+Sidepanel performs an additional `CHECK_FILE_EXISTS` verification before accepting non-skipped completion.

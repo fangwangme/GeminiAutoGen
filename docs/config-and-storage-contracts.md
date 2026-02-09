@@ -15,6 +15,8 @@ This document defines extension storage keys, ownership, and defaults.
 - `loadedTasks`: `TaskItem[]` from uploaded JSON
 - `currentTask`: current task payload for content execution
 - `currentTaskMode`: `"full" | "download-only"`
+- `currentTaskIndex`: current task index owned by sidepanel, used for message scoping
+- `currentTaskRunSeq`: per-run monotonic sequence owned by sidepanel, used for stale message rejection
 - `lockedConversationUrl`: locked Gemini chat URL
 
 ## UI Keys
@@ -31,6 +33,8 @@ This document defines extension storage keys, ownership, and defaults.
 
 - `settings_generationTimeout` (default `120`)
 - `settings_downloadTimeout` (default `120`)
+- `settings_downloadDetectTimeout` (default `120`, fallback to `settings_downloadTimeout`)
+- `settings_downloadStabilityTimeout` (default `120`, fallback to `settings_downloadTimeout`)
 - `settings_pageLoadTimeout` (default `30`)
 - `settings_inputTimeout` (default `5`)
 - `settings_stepDelay` (default `1`)

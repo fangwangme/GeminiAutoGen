@@ -2,9 +2,26 @@ export type TaskErrorType = "generation" | "download" | "folder" | "locked-url";
 export type TaskRunMode = "full" | "download-only";
 
 export type PanelMessage =
-  | { action: "TASK_COMPLETE"; skipped?: boolean }
-  | { action: "TASK_ERROR"; error: string; errorType?: TaskErrorType }
-  | { action: "UPDATE_STATUS"; status: string; isError?: boolean }
+  | {
+      action: "TASK_COMPLETE";
+      skipped?: boolean;
+      taskIndex?: number;
+      taskRunSeq?: number;
+    }
+  | {
+      action: "TASK_ERROR";
+      error: string;
+      errorType?: TaskErrorType;
+      taskIndex?: number;
+      taskRunSeq?: number;
+    }
+  | {
+      action: "UPDATE_STATUS";
+      status: string;
+      isError?: boolean;
+      taskIndex?: number;
+      taskRunSeq?: number;
+    }
   | {
       action: "PANEL_LOG";
       level: "log" | "warn" | "error";

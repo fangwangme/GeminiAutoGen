@@ -13,6 +13,8 @@ import {
 type TimingSettings = {
   settings_generationTimeout?: number;
   settings_downloadTimeout?: number;
+  settings_downloadDetectTimeout?: number;
+  settings_downloadStabilityTimeout?: number;
   settings_pageLoadTimeout?: number;
   settings_inputTimeout?: number;
   settings_stepDelay?: number;
@@ -68,6 +70,12 @@ const generationTimeoutInput = document.getElementById(
 ) as HTMLInputElement;
 const downloadTimeoutInput = document.getElementById(
   "downloadTimeout"
+) as HTMLInputElement;
+const downloadDetectTimeoutInput = document.getElementById(
+  "downloadDetectTimeout"
+) as HTMLInputElement;
+const downloadStabilityTimeoutInput = document.getElementById(
+  "downloadStabilityTimeout"
 ) as HTMLInputElement;
 const pageLoadTimeoutInput = document.getElementById(
   "pageLoadTimeout"
@@ -136,6 +144,8 @@ const applyLanguage = (language: Language) => {
 const DEFAULTS = {
   settings_generationTimeout: 120,
   settings_downloadTimeout: 120,
+  settings_downloadDetectTimeout: 120,
+  settings_downloadStabilityTimeout: 120,
   settings_pageLoadTimeout: 30,
   settings_inputTimeout: 5,
   settings_stepDelay: 1,
@@ -153,6 +163,8 @@ async function loadSettings() {
     LANGUAGE_STORAGE_KEY,
     "settings_generationTimeout",
     "settings_downloadTimeout",
+    "settings_downloadDetectTimeout",
+    "settings_downloadStabilityTimeout",
     "settings_pageLoadTimeout",
     "settings_inputTimeout",
     "settings_stepDelay",
@@ -173,6 +185,16 @@ async function loadSettings() {
   );
   downloadTimeoutInput.value = String(
     result.settings_downloadTimeout ?? DEFAULTS.settings_downloadTimeout
+  );
+  downloadDetectTimeoutInput.value = String(
+    result.settings_downloadDetectTimeout ??
+      result.settings_downloadTimeout ??
+      DEFAULTS.settings_downloadDetectTimeout
+  );
+  downloadStabilityTimeoutInput.value = String(
+    result.settings_downloadStabilityTimeout ??
+      result.settings_downloadTimeout ??
+      DEFAULTS.settings_downloadStabilityTimeout
   );
   pageLoadTimeoutInput.value = String(
     result.settings_pageLoadTimeout ?? DEFAULTS.settings_pageLoadTimeout
@@ -252,6 +274,14 @@ saveSettingsBtn.addEventListener("click", async () => {
       settings_downloadTimeout: toSecondsNumber(
         downloadTimeoutInput.value,
         DEFAULTS.settings_downloadTimeout
+      ),
+      settings_downloadDetectTimeout: toSecondsNumber(
+        downloadDetectTimeoutInput.value,
+        DEFAULTS.settings_downloadDetectTimeout
+      ),
+      settings_downloadStabilityTimeout: toSecondsNumber(
+        downloadStabilityTimeoutInput.value,
+        DEFAULTS.settings_downloadStabilityTimeout
       ),
       settings_pageLoadTimeout: toSecondsNumber(
         pageLoadTimeoutInput.value,

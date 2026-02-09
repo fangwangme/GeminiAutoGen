@@ -14,8 +14,8 @@ This document defines timeout ownership and retry behavior.
 
 ## Background Layer (`src/background.ts`)
 
-- `WAIT_AND_RENAME` uses `settings_downloadTimeout` as a **global deadline**
-- polling and stabilization share the same deadline
+- polling phase timeout: `settings_downloadDetectTimeout` (fallback `settings_downloadTimeout`)
+- stabilization phase timeout: `settings_downloadStabilityTimeout` (fallback `settings_downloadTimeout`)
 
 ## Sidepanel Layer (`src/sidepanel/taskLifecycle.ts`)
 
@@ -23,6 +23,7 @@ This document defines timeout ownership and retry behavior.
   - `full`: `generationTimeout + 15s`
   - `download-only`: `downloadTimeout + 15s`
 - watchdog is fail-safe, not primary business timeout
+- completion consistency guard: non-skipped `TASK_COMPLETE` must pass `CHECK_FILE_EXISTS`, otherwise treated as `download` error
 
 ## Retry Policy
 

@@ -27,13 +27,20 @@ State is centralized in `TaskLifecycleState` (`src/sidepanel/taskLifecycle.ts`),
 `startRun.ts` performs:
 
 1. locked conversation URL validation
-2. tab acquisition (reuse or create)
-3. optional lock URL reconciliation
-4. existing-file pre-scan (`LIST_ALL_FILES`)
-5. pending queue build
-6. state reset and timer start
+2. operational precondition: locked URL should be an existing conversation that already has at least one generated image
+3. tab acquisition (reuse or create)
+4. optional lock URL reconciliation
+5. existing-file pre-scan (`LIST_ALL_FILES`)
+6. pending queue build
+7. state reset and timer start
 
 Then `taskLifecycle.processNextTask()` is called.
+
+Why avoid new conversation:
+
+- download-only retry depends on finding an existing response container and download button in history
+- history settle gate uses existing image load state to avoid race with unfinished rendering
+- in fresh conversation (no generated image yet), targeting is less stable and recovery path is weaker
 
 ## Task Processing
 
@@ -41,24 +48,26 @@ Then `taskLifecycle.processNextTask()` is called.
 
 1. check run complete
 2. set UI status/progress
-3. persist `currentTask` + `currentTaskMode`
+3. persist `currentTask` + `currentTaskMode` + `currentTaskIndex` + `currentTaskRunSeq`
 4. arm watchdog
 5. inject content module into target tab
 
-Content script then returns completion/error via runtime messages.
+Content script then returns completion/error via runtime messages that carry `taskIndex` and `taskRunSeq`.
 
 ## Message Handling
 
 `handlePanelMessage()` consumes:
 
 - `TASK_COMPLETE`
-  - clear retry for task
-  - update counters
-  - update remaining time
-  - recreate tab for next task
+  - reject stale messages by `taskIndex` / `taskRunSeq`
+  - if `skipped=false`, verify output with `CHECK_FILE_EXISTS` before accepting completion
+  - if verification fails, convert to `download` error and route retry policy
+  - if verification passes, clear retry and advance queue
 - `TASK_ERROR`
+  - reject stale messages by `taskIndex` / `taskRunSeq`
   - route to `handleTaskError()`
 - `UPDATE_STATUS`
+  - reject stale status updates by `taskIndex` / `taskRunSeq`
   - update sidepanel status text
 - `PANEL_LOG`
   - append timestamped log line

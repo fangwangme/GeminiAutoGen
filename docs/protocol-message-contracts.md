@@ -87,7 +87,12 @@ Request:
 ### `TASK_COMPLETE`
 
 ```ts
-{ action: "TASK_COMPLETE"; skipped: boolean }
+{
+  action: "TASK_COMPLETE";
+  skipped: boolean;
+  taskIndex?: number;
+  taskRunSeq?: number;
+}
 ```
 
 ### `TASK_ERROR`
@@ -97,14 +102,24 @@ Request:
   action: "TASK_ERROR";
   error: string;
   errorType?: "generation" | "download" | "folder" | "locked-url";
+  taskIndex?: number;
+  taskRunSeq?: number;
 }
 ```
 
 ### `UPDATE_STATUS`
 
 ```ts
-{ action: "UPDATE_STATUS"; status: string; isError?: boolean }
+{
+  action: "UPDATE_STATUS";
+  status: string;
+  isError?: boolean;
+  taskIndex?: number;
+  taskRunSeq?: number;
+}
 ```
+
+`taskIndex` + `taskRunSeq` are used by sidepanel to reject stale messages from previous task runs.
 
 ## Log Relay
 
@@ -139,3 +154,10 @@ Request:
 - `folder`: directory handle/permission errors; stop immediately.
 - `download`: download detect/rename timeout or related failures; retry policy applies.
 - `generation`: model output / DOM progress / prompt-anchor failures; retry policy applies.
+
+## Completion Consistency Guard
+
+When sidepanel receives `TASK_COMPLETE(skipped=false)`, it performs `CHECK_FILE_EXISTS` for the target filename before advancing queue index.
+
+- if file exists: accept completion
+- if file missing: convert to `download` error and enter retry policy

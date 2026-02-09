@@ -29,9 +29,26 @@ export type WaitAndRenameResponse = {
 type ContentMessage =
   | { action: "CHECK_FILE_EXISTS"; filename: string }
   | { action: "WAIT_AND_RENAME"; targetFilename: string }
-  | { action: "TASK_COMPLETE"; skipped: boolean }
-  | { action: "TASK_ERROR"; error: string; errorType?: TaskErrorType }
-  | { action: "UPDATE_STATUS"; status: string; isError?: boolean }
+  | {
+      action: "TASK_COMPLETE";
+      skipped: boolean;
+      taskIndex?: number;
+      taskRunSeq?: number;
+    }
+  | {
+      action: "TASK_ERROR";
+      error: string;
+      errorType?: TaskErrorType;
+      taskIndex?: number;
+      taskRunSeq?: number;
+    }
+  | {
+      action: "UPDATE_STATUS";
+      status: string;
+      isError?: boolean;
+      taskIndex?: number;
+      taskRunSeq?: number;
+    }
   | {
       action: "LOG";
       level: "log" | "warn" | "error";

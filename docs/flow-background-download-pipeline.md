@@ -26,9 +26,10 @@ This document describes file handling logic in `src/background.ts`.
 4. poll for new file:
    - prefer Gemini naming patterns first
    - after grace window, widen to any new image
+   - timeout source: `settings_downloadDetectTimeout` (fallback: `settings_downloadTimeout`)
 5. once detected, wait stabilization:
    - file size must stay stable for multiple ticks
-   - uses shared global deadline (not separate unlimited phase)
+   - timeout source: `settings_downloadStabilityTimeout` (fallback: `settings_downloadTimeout`)
 6. run image checks:
    - 1:1 aspect ratio treated as generation failure
    - optional 16:9 warning check

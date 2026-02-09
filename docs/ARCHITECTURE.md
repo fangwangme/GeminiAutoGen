@@ -8,17 +8,22 @@ For detailed logic, use `docs/README.md` as the entry index.
 1. `sidepanel` starts a run (`src/sidepanel.ts`).
 2. Task state machine executes (`src/sidepanel/taskLifecycle.ts`):
    - load current task
+   - persist task index/run sequence for message scoping
    - inject content module into Gemini tab
+   - reject stale task messages from prior runs
+   - verify output exists before accepting task completion
    - handle retries/failures
    - recreate tab between tasks
    - watchdog hard-timeout fallback
 3. Content script performs one task (`src/content.ts`):
    - validate locked conversation URL
+   - read task index/run sequence context for scoped reporting
    - wait page/input readiness
    - enforce history-image settle gate
    - type/send prompt
    - wait generation
    - trigger download button
+   - report completion/error with task scope fields
 4. Background handles file operations (`src/background.ts`):
    - poll source folder
    - wait file stabilization
@@ -74,7 +79,9 @@ User-configurable settings are stored in extension local storage.
 
 Primary defaults:
 - generation timeout: `120s`
-- download timeout: `120s`
+- download response timeout (content race guard): `120s`
+- download detect timeout (background poll phase): `120s`
+- download stabilization timeout (background stabilize phase): `120s`
 - page stability timeout: `30s`
 - input timeout: `5s`
 - step delay: `1s`
@@ -86,6 +93,16 @@ Behavior:
   - `full`: `generationTimeout + 15s`
   - `download-only`: `downloadTimeout + 15s`
 - Watchdog timeout marks task failed and proceeds, preventing infinite stuck loops.
+
+## Conversation Preconditions
+
+For stable operation, run on a locked existing conversation that already contains at least one generated image.
+Avoid fresh `new conversation` threads for production runs.
+
+Reasoning:
+- retry-download mode depends on existing response/download targets in conversation history
+- history settle gate relies on prior image-load signals
+- fresh threads provide weaker targeting context and are more prone to race conditions
 
 ## Retry and Error Policy (Overview)
 
