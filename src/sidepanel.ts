@@ -8,17 +8,47 @@ import {
   LANGUAGE_STORAGE_KEY,
   normalizeLanguage
 } from "./i18n.js";
-
-const formatLogTimestamp = () => new Date().toISOString();
-const attachConsoleTimestamps = () => {
-  const levels: Array<"log" | "warn" | "error"> = ["log", "warn", "error"];
-  levels.forEach((level) => {
-    const original = console[level].bind(console);
-    console[level] = (...args: unknown[]) => {
-      original(`[${formatLogTimestamp()}]`, ...args);
-    };
-  });
-};
+import {
+  validateLockedConversationUrl
+} from "./utils/lockedConversation.js";
+import { attachConsoleTimestamps } from "./sidepanel/consoleTimestamp.js";
+import {
+  executeScript,
+  runtimeSendMessage,
+  storageClear,
+  storageGet,
+  storageRemove,
+  storageSet,
+  tabsCreate,
+  tabsGet,
+  tabsQuery,
+  tabsRemove,
+  tabsUpdate
+} from "./sidepanel/chromeApi.js";
+import {
+  ensureLockedConversationTab as ensureLockedConversationTabHelper,
+  waitForPageLoad as waitForPageLoadHelper
+} from "./sidepanel/tabHelpers.js";
+import { createLogView } from "./sidepanel/logView.js";
+import {
+  PanelMessage,
+  TaskRunMode
+} from "./sidepanel/panelTypes.js";
+import { restoreInitialState } from "./sidepanel/initState.js";
+import { updateRemainingTimeLabel } from "./sidepanel/remainingTime.js";
+import { bindResetControl, bindStopControl } from "./sidepanel/runControls.js";
+import {
+  createTaskLifecycle,
+  TaskLifecycleState
+} from "./sidepanel/taskLifecycle.js";
+import { startRun } from "./sidepanel/startRun.js";
+import { bindUrlLockControls } from "./sidepanel/urlLock.js";
+import {
+  bindCurrentFileCopy,
+  bindJsonFileUpload,
+  bindLogControls,
+  bindSettingsButton
+} from "./sidepanel/uiBindings.js";
 attachConsoleTimestamps();
 
 const LOG_COLLAPSED_STORAGE_KEY = "logCollapsed";
@@ -59,145 +89,6 @@ const applyLanguage = (language: Language) => {
   document.title = t("sidepanel.documentTitle");
   document.documentElement.lang = currentLanguage === "zh" ? "zh-CN" : "en";
   updateLogToggleLabel();
-};
-
-type PanelMessage =
-  | { action: "TASK_COMPLETE"; skipped?: boolean }
-  | { action: "TASK_ERROR"; error: string; errorType?: TaskErrorType }
-  | { action: "UPDATE_STATUS"; status: string; isError?: boolean }
-  | {
-      action: "PANEL_LOG";
-      level: "log" | "warn" | "error";
-      message: string;
-      data?: unknown;
-      source?: string;
-      timestamp: string;
-    };
-
-type TaskErrorType = "generation" | "download" | "folder" | "locked-url";
-type TaskRunMode = "full" | "download-only";
-
-type PanelBackgroundMessage =
-  | { action: "OPEN_OPTIONS" }
-  | { action: "LIST_ALL_FILES" }
-  | { action: "RESET_STATE" };
-
-type ListFilesResponse = {
-  files?: string[];
-};
-
-type ScriptInjection = chrome.scripting.ScriptInjection<unknown[], unknown>;
-type InjectionResult = chrome.scripting.InjectionResult<unknown>;
-
-const storageGet = <T,>(keys: string[]): Promise<T> =>
-  chrome.storage.local.get(keys) as unknown as Promise<T>;
-
-const storageSet = (items: Record<string, unknown>): Promise<void> =>
-  chrome.storage.local.set(items) as unknown as Promise<void>;
-
-const storageRemove = (keys: string | string[]): Promise<void> =>
-  chrome.storage.local.remove(keys) as unknown as Promise<void>;
-
-const storageClear = (): Promise<void> =>
-  chrome.storage.local.clear() as unknown as Promise<void>;
-
-const runtimeSendMessage = <T,>(
-  message: PanelMessage | PanelBackgroundMessage
-): Promise<T> => chrome.runtime.sendMessage(message) as unknown as Promise<T>;
-
-const tabsQuery = (
-  queryInfo: chrome.tabs.QueryInfo
-): Promise<chrome.tabs.Tab[]> =>
-  chrome.tabs.query(queryInfo) as unknown as Promise<chrome.tabs.Tab[]>;
-
-const tabsUpdate = (
-  tabId: number,
-  props: chrome.tabs.UpdateProperties
-): Promise<chrome.tabs.Tab> =>
-  chrome.tabs.update(tabId, props) as unknown as Promise<chrome.tabs.Tab>;
-
-const tabsCreate = (
-  props: chrome.tabs.CreateProperties
-): Promise<chrome.tabs.Tab> =>
-  chrome.tabs.create(props) as unknown as Promise<chrome.tabs.Tab>;
-
-const tabsGet = (tabId: number): Promise<chrome.tabs.Tab> =>
-  chrome.tabs.get(tabId) as unknown as Promise<chrome.tabs.Tab>;
-
-const tabsRemove = (tabId: number): Promise<void> =>
-  chrome.tabs.remove(tabId) as unknown as Promise<void>;
-
-const executeScript = (
-  injection: ScriptInjection
-): Promise<InjectionResult[]> =>
-  chrome.scripting.executeScript(
-    injection
-  ) as unknown as Promise<InjectionResult[]>;
-
-const normalizeUrlForCompare = (url: string) => {
-  try {
-    const parsed = new URL(url);
-    const normalizedPath = parsed.pathname.replace(/\/$/, "");
-    return `${parsed.origin}${normalizedPath}`;
-  } catch {
-    return url.replace(/\/$/, "");
-  }
-};
-
-const urlsMatch = (lockedUrl: string, currentUrl: string) =>
-  normalizeUrlForCompare(lockedUrl) === normalizeUrlForCompare(currentUrl);
-
-const isGeminiHost = (hostname: string) =>
-  hostname === "gemini.google.com" || hostname.endsWith(".gemini.google.com");
-
-const validateLockedConversationUrl = (url: string) => {
-  try {
-    const parsed = new URL(url);
-    if (!isGeminiHost(parsed.hostname)) {
-      return {
-        ok: false,
-        message: t("validation.lockedUrl.mustGemini")
-      } as const;
-    }
-    const normalizedPath = parsed.pathname.replace(/\/$/, "");
-    const pathWithoutAccount = normalizedPath.replace(/^\/u\/\d+/, "");
-    if (pathWithoutAccount === "/app") {
-      return {
-        ok: false,
-        message: t("validation.lockedUrl.mustSpecificConversation")
-      } as const;
-    }
-    if (!pathWithoutAccount.includes("/app/")) {
-      return {
-        ok: false,
-        message: t("validation.lockedUrl.mustConversation")
-      } as const;
-    }
-    return { ok: true } as const;
-  } catch {
-    return { ok: false, message: t("validation.lockedUrl.invalid") } as const;
-  }
-};
-
-const isFolderAuthErrorMessage = (message: string) => {
-  const normalized = message.toLowerCase();
-  return [
-    "missing directory handles",
-    "permission lost",
-    "directory iteration is not supported",
-    "notallowederror",
-    "securityerror",
-    "permission",
-    "not authorized",
-    "denied"
-  ].some((fragment) => normalized.includes(fragment));
-};
-
-const isDownloadErrorMessage = (message: string) => {
-  const normalized = message.toLowerCase();
-  return ["download", "rename", "waiting for file", "timeout waiting for download"].some(
-    (fragment) => normalized.includes(fragment)
-  );
 };
 
 document.addEventListener("DOMContentLoaded", async () => {
@@ -259,20 +150,57 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // State
   let loadedTasks: TaskItem[] = [];
-  let taskQueue: TaskItem[] = [];
-  let currentIndex = 0;
-  let isRunning = false;
-  let conversationUrl = "";
-  let lockedConversationUrl = ""; // Locked URL from storage
   let timerInterval: number | undefined;
-  let startTime = 0;
-  let currentTabId: number | null = null;
-  const retryCounts = new Map<number, number>();
-  let lastLogTaskIndex: number | null = null;
-  let skippedCount = 0;
-  let failedCount = 0;
-  let consecutiveFailureCount = 0;
-  let nextTaskMode: TaskRunMode = "full";
+  const runState: TaskLifecycleState = {
+    taskQueue: [],
+    currentIndex: 0,
+    isRunning: false,
+    conversationUrl: "",
+    lockedConversationUrl: "",
+    startTime: 0,
+    currentTabId: null,
+    retryCounts: new Map<number, number>(),
+    lastLogTaskIndex: null,
+    skippedCount: 0,
+    failedCount: 0,
+    consecutiveFailureCount: 0,
+    nextTaskMode: "full" as TaskRunMode,
+    shouldClearLogBeforeNextTask: false
+  };
+
+  const waitForPageLoad = (tabId: number, timeoutMs: number) =>
+    waitForPageLoadHelper(tabId, timeoutMs, tabsGet);
+
+  const ensureLockedConversationTab = (
+    tabId: number,
+    pageLoadTimeout: number,
+    normalizedStepDelay: number | undefined,
+    reason: string
+  ) =>
+    ensureLockedConversationTabHelper({
+      tabId,
+      pageLoadTimeout,
+      normalizedStepDelay,
+      reason,
+      lockedConversationUrl: runState.lockedConversationUrl,
+      t,
+      tabsGet,
+      tabsCreate,
+      tabsRemove,
+      setCurrentTabId: (id) => {
+        runState.currentTabId = id;
+      },
+      getCurrentTabId: () => runState.currentTabId,
+      setIsRunning: (running) => {
+        runState.isRunning = running;
+      },
+      updateUI,
+      setStatus: (text, color) => {
+        statusText.textContent = text;
+        statusText.style.color = color;
+      },
+      waitForPageLoad
+    });
 
   const refreshDynamicLabels = () => {
     if (loadedTasks.length > 0) {
@@ -285,13 +213,13 @@ document.addEventListener("DOMContentLoaded", async () => {
       fileInfo.style.color = "var(--muted)";
     }
 
-    if (!lockedConversationUrl) {
+    if (!runState.lockedConversationUrl) {
       urlStatus.textContent = t("sidepanel.lockedUrl.none");
       urlStatus.style.color = "var(--muted)";
       return;
     }
 
-    const validation = validateLockedConversationUrl(lockedConversationUrl);
+    const validation = validateLockedConversationUrl(runState.lockedConversationUrl, t);
     if (validation.ok) {
       urlStatus.textContent = t("sidepanel.status.urlLocked");
       urlStatus.style.color = "var(--success)";
@@ -310,803 +238,155 @@ document.addEventListener("DOMContentLoaded", async () => {
     return t("time.short", { minutes, seconds });
   };
 
-  const clearLogOutput = () => {
-    if (logOutput) {
-      logOutput.textContent = "";
-    }
-  };
+  const { clearLogOutput, formatLogData, appendLogLine } = createLogView(logOutput);
 
-  const formatLogData = (data?: unknown) => {
-    if (data === undefined) return "";
-    try {
-      const serialized = JSON.stringify(data);
-      return serialized ? ` ${serialized}` : "";
-    } catch {
-      return ` ${String(data)}`;
-    }
-  };
+  bindSettingsButton(settingsBtn, runtimeSendMessage);
+  bindCurrentFileCopy({
+    currentFileNameEl,
+    copiedLabel: () => t("sidepanel.currentFile.copied")
+  });
+  bindLogControls({
+    logCopyBtn,
+    logClearBtn,
+    logToggleBtn,
+    logOutput,
+    clearLogOutput,
+    applyLogCollapsed,
+    getLogCollapsed: () => logCollapsed,
+    setLogCollapsed: (collapsed) => {
+      logCollapsed = collapsed;
+    },
+    storageSet,
+    logCollapsedStorageKey: LOG_COLLAPSED_STORAGE_KEY,
+    copiedLabel: () => t("sidepanel.currentFile.copied")
+  });
 
-  const appendLogLine = (line: string) => {
-    if (!logOutput) return;
-    logOutput.textContent = logOutput.textContent
-      ? `${logOutput.textContent}\n${line}`
-      : line;
-    requestAnimationFrame(() => {
-      logOutput.scrollTop = logOutput.scrollHeight;
-    });
-  };
+  await restoreInitialState({
+    runState,
+    t,
+    conversationUrlInput,
+    urlStatus,
+    fileInfo,
+    setLoadedTasks: (tasks) => {
+      loadedTasks = tasks;
+    },
+    storageGet
+  });
 
-  // Settings Button
-  if (settingsBtn) {
-    settingsBtn.addEventListener("click", async () => {
-      try {
-        await chrome.runtime.openOptionsPage();
-      } catch {
-        runtimeSendMessage<void>({ action: "OPEN_OPTIONS" });
+  bindUrlLockControls({
+    lockUrlBtn,
+    clearUrlBtn,
+    conversationUrlInput,
+    urlStatus,
+    runState,
+    t,
+    storageSet,
+    storageRemove
+  });
+
+  bindJsonFileUpload({
+    jsonFileInput,
+    setLoadedTasks: (tasks) => {
+      loadedTasks = tasks;
+    },
+    setFileInfo: (text, isError = false) => {
+      fileInfo.textContent = text;
+      fileInfo.style.color = isError ? "var(--danger)" : "var(--success)";
+      if (text === t("sidepanel.file.noFile")) {
+        fileInfo.style.color = "var(--muted)";
       }
-    });
-  } else {
-    console.warn("[Panel] Settings button not found");
-  }
+    },
+    t: (key, vars) => t(key, vars),
+    storageSet
+  });
 
-  // Click filename to copy (without extension)
-  if (currentFileNameEl) {
-    currentFileNameEl.addEventListener("click", async () => {
-      const text = currentFileNameEl.textContent || "";
-      // Remove emoji prefix like "📷 " and file extension
-      const filename = text.replace(/^[^\w]*/, "").trim();
-      const nameWithoutExt = filename.replace(/\.[^.]+$/, "");
-      if (nameWithoutExt) {
-        try {
-          await navigator.clipboard.writeText(nameWithoutExt);
-          // Brief visual feedback
-          const original = currentFileNameEl.textContent;
-          currentFileNameEl.textContent = t("sidepanel.currentFile.copied");
-          setTimeout(() => {
-            currentFileNameEl.textContent = original;
-          }, 800);
-        } catch (err) {
-          console.error("[Panel] Failed to copy:", err);
-        }
-      }
-    });
-  }
-
-  if (logCopyBtn) {
-    logCopyBtn.addEventListener("click", async () => {
-      if (!logOutput) return;
-      const text = logOutput.textContent || "";
-      if (!text.trim()) return;
-      try {
-        await navigator.clipboard.writeText(text);
-      } catch (err) {
-        console.error("[Panel] Failed to copy logs:", err);
-      }
-    });
-  }
-
-  if (logClearBtn) {
-    logClearBtn.addEventListener("click", () => {
-      clearLogOutput();
-    });
-  }
-
-  if (logToggleBtn) {
-    logToggleBtn.addEventListener("click", async () => {
-      applyLogCollapsed(!logCollapsed);
-      await storageSet({ [LOG_COLLAPSED_STORAGE_KEY]: logCollapsed });
-    });
-  }
-
-  // Load saved locked URL
-  const urlData = await storageGet<{ lockedConversationUrl?: string }>([
-    "lockedConversationUrl"
-  ]);
-  if (urlData.lockedConversationUrl) {
-    const candidate = urlData.lockedConversationUrl.trim();
-    const validation = validateLockedConversationUrl(candidate);
-    conversationUrlInput.value = candidate;
-    if (validation.ok) {
-      lockedConversationUrl = candidate;
-      urlStatus.textContent = t("sidepanel.status.urlLocked");
-      urlStatus.style.color = "var(--success)";
-    } else {
-      lockedConversationUrl = "";
-      urlStatus.textContent = t("sidepanel.status.validationError", {
-        reason: validation.message
-      });
-      urlStatus.style.color = "var(--danger)";
-    }
-  }
-
-  // Load saved tasks
-  const data = await storageGet<{ loadedTasks?: TaskItem[] }>(["loadedTasks"]);
-  if (data.loadedTasks) {
-    loadedTasks = data.loadedTasks;
-    fileInfo.textContent = t("sidepanel.status.loadedTasks", {
-      count: loadedTasks.length
-    });
-    fileInfo.style.color = "var(--success)";
-  }
-
-  // Lock URL Button
-  if (lockUrlBtn) {
-    lockUrlBtn.addEventListener("click", async () => {
-      if (!conversationUrlInput || !urlStatus) return;
-      const url = conversationUrlInput.value.trim();
-      if (!url) {
-        urlStatus.textContent = t("sidepanel.status.urlEnter");
-        urlStatus.style.color = "var(--danger)";
-        return;
-      }
-      const validation = validateLockedConversationUrl(url);
-      if (!validation.ok) {
-        urlStatus.textContent = t("sidepanel.status.validationError", {
-          reason: validation.message
-        });
-        urlStatus.style.color = "var(--danger)";
-        return;
-      }
-      lockedConversationUrl = url;
-      try {
-        await storageSet({ lockedConversationUrl: url });
-        urlStatus.textContent = t("sidepanel.status.urlLocked");
-        urlStatus.style.color = "var(--success)";
-        console.log(`[Panel] Locked conversation URL: ${url}`);
-      } catch (err) {
-        urlStatus.textContent = t("sidepanel.status.urlSaveFailed");
-        urlStatus.style.color = "var(--danger)";
-        console.error("[Panel] Failed to lock URL:", err);
-      }
-    });
-  } else {
-    console.warn("[Panel] Lock URL button not found");
-  }
-
-  // Clear URL Button
-  if (clearUrlBtn) {
-    clearUrlBtn.addEventListener("click", async () => {
-      if (!conversationUrlInput || !urlStatus) return;
-      lockedConversationUrl = "";
-      conversationUrlInput.value = "";
-      try {
-        await storageRemove("lockedConversationUrl");
-        urlStatus.textContent = t("sidepanel.lockedUrl.none");
-        urlStatus.style.color = "var(--muted)";
-        console.log("[Panel] Conversation URL lock cleared");
-      } catch (err) {
-        urlStatus.textContent = t("sidepanel.status.urlClearFailed");
-        urlStatus.style.color = "var(--danger)";
-        console.error("[Panel] Failed to clear URL:", err);
-      }
-    });
-  } else {
-    console.warn("[Panel] Clear URL button not found");
-  }
-
-  // JSON File Upload
-  jsonFileInput.addEventListener("change", (event: Event) => {
-    const target = event.target as HTMLInputElement | null;
-    const file = target?.files?.[0];
-    if (!file) {
-      loadedTasks = [];
-      fileInfo.textContent = t("sidepanel.file.noFile");
-      fileInfo.style.color = "var(--muted)";
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = (e: ProgressEvent<FileReader>) => {
-      try {
-        const result = e.target?.result;
-        const rawText = typeof result === "string" ? result : "";
-        const json = JSON.parse(rawText) as unknown;
-        if (Array.isArray(json)) {
-          loadedTasks = json as TaskItem[];
-          fileInfo.textContent = t("sidepanel.status.loadedTasks", {
-            count: json.length
-          });
-          fileInfo.style.color = "var(--success)";
-          void storageSet({ loadedTasks: json });
-        } else {
-          throw new Error("File must contain an array");
-        }
-      } catch {
-        fileInfo.textContent = t("sidepanel.status.errorInvalidJson");
-        fileInfo.style.color = "var(--danger)";
-        loadedTasks = [];
-      }
-    };
-    reader.readAsText(file);
+  const taskLifecycle = createTaskLifecycle({
+    state: runState,
+    t,
+    statusText,
+    progressBar,
+    progressText,
+    currentFileNameEl,
+    appendLogLine,
+    formatLogData,
+    clearLogOutput,
+    formatDuration,
+    updateUI,
+    stopTimer,
+    updateRemainingTime,
+    waitForPageLoad,
+    ensureLockedConversationTab,
+    storageGet,
+    storageSet,
+    runtimeSendMessage,
+    executeScript,
+    tabsCreate,
+    tabsGet,
+    tabsQuery,
+    tabsRemove
   });
 
   // START Button
   startBtn.addEventListener("click", async () => {
-    const storedUrl = await storageGet<{ lockedConversationUrl?: string }>([
-      "lockedConversationUrl"
-    ]);
-    const lockedCandidate = storedUrl.lockedConversationUrl?.trim() || "";
-    if (!lockedCandidate) {
-      statusText.textContent = t("sidepanel.status.lockUrlFirst");
-      statusText.style.color = "var(--danger)";
-      return;
-    }
-    const lockedValidation = validateLockedConversationUrl(lockedCandidate);
-    if (!lockedValidation.ok) {
-      statusText.textContent = t("sidepanel.status.lockedUrlInvalid", {
-        reason: lockedValidation.message
-      });
-      statusText.style.color = "var(--danger)";
-      return;
-    }
-    lockedConversationUrl = lockedCandidate;
-
-    if (loadedTasks.length === 0) {
-      statusText.textContent = t("sidepanel.status.uploadJson");
-      statusText.style.color = "var(--danger)";
-      return;
-    }
-
-    // Use locked URL only
-    conversationUrl = lockedConversationUrl;
-    console.log(`[Panel] Using locked conversation URL: ${conversationUrl}`);
-
-    // Get or create tab for the locked URL
-    const [existingTab] = await tabsQuery({
-      url: `${conversationUrl}*`,
-      currentWindow: true
+    const started = await startRun({
+      loadedTasks,
+      runState,
+      t,
+      statusText,
+      clearLogOutput,
+      appendLogLine,
+      updateUI,
+      startTimer,
+      storageGet,
+      runtimeSendMessage,
+      tabsQuery,
+      tabsUpdate,
+      tabsCreate,
+      waitForPageLoad,
+      ensureLockedConversationTab
     });
-
-    if (existingTab && typeof existingTab.id === "number") {
-      currentTabId = existingTab.id;
-      await tabsUpdate(currentTabId, { active: true });
-    } else {
-      // Create new tab with locked URL
-      const newTab = await tabsCreate({ url: conversationUrl });
-      currentTabId = newTab.id ?? null;
-      if (currentTabId) {
-        const stepSettings = await storageGet<{
-          settings_stepDelay?: number;
-          settings_pageLoadTimeout?: number;
-        }>(["settings_stepDelay", "settings_pageLoadTimeout"]);
-        const pageLoadTimeoutMs =
-          (stepSettings.settings_pageLoadTimeout || 30) * 1000;
-        await waitForPageLoad(currentTabId, pageLoadTimeoutMs);
-        const rawStepDelay = stepSettings.settings_stepDelay;
-        const normalizedStepDelay =
-          rawStepDelay && rawStepDelay > 60 ? rawStepDelay / 1000 : rawStepDelay;
-        const tabReadyDelayMs = (normalizedStepDelay || 1) * 2 * 1000;
-        await new Promise((r) => setTimeout(r, tabReadyDelayMs));
-      }
+    if (started) {
+      void taskLifecycle.processNextTask();
     }
-
-    if (!currentTabId) {
-      statusText.textContent = t("sidepanel.status.failedToOpenTab");
-      statusText.style.color = "var(--danger)";
-      return;
-    }
-
-    // Pre-scan for existing files
-    statusText.textContent = t("sidepanel.status.checkingExisting");
-    let existingFiles = new Set<string>();
-    try {
-      const response = await runtimeSendMessage<ListFilesResponse>({
-        action: "LIST_ALL_FILES"
-      });
-      existingFiles = new Set(response.files || []);
-    } catch (err) {
-      console.warn(
-        "Could not list existing files (background might be restarting):",
-        err
-      );
-      // Proceed without skipping (safer fallback)
-    }
-
-    // Filter queue
-    taskQueue = loadedTasks.filter((item) => {
-      if (!item || !item.name) return false; // Skip invalid items
-      let safeName = item.name.replace(/[^a-z0-9_\-.]/gi, "_");
-      if (
-        !safeName.toLowerCase().endsWith(".png") &&
-        !safeName.toLowerCase().endsWith(".jpg")
-      ) {
-        safeName += ".png";
-      }
-      return !existingFiles.has(safeName);
-    });
-
-    const skipped = loadedTasks.length - taskQueue.length;
-    if (skipped > 0) {
-      statusText.textContent = t("sidepanel.status.skippedExisting", {
-        count: skipped
-      });
-    }
-
-    if (taskQueue.length === 0) {
-      statusText.textContent = t("sidepanel.status.allTasksCompleted");
-      statusText.style.color = "var(--success)";
-      return;
-    }
-
-    // Start
-    currentIndex = 0;
-    retryCounts.clear();
-    skippedCount = 0;
-    failedCount = 0;
-    consecutiveFailureCount = 0;
-    nextTaskMode = "full";
-    failedCount = 0;
-    consecutiveFailureCount = 0;
-    nextTaskMode = "full";
-    isRunning = true;
-    updateUI(true);
-    startTimer();
-
-    processNextTask();
   });
 
-  // STOP Button
-  stopBtn.addEventListener("click", () => {
-    isRunning = false;
-    retryCounts.clear();
-    skippedCount = 0;
-    failedCount = 0;
-    consecutiveFailureCount = 0;
-    nextTaskMode = "full";
-    stopTimer();
-    updateUI(false);
-    statusText.textContent = t("sidepanel.status.stoppedByUser");
-    statusText.style.color = "var(--danger)";
+  bindStopControl({
+    stopBtn,
+    runState,
+    t,
+    stopTimer,
+    updateUI,
+    statusText,
+    onBeforeStop: () => taskLifecycle.cancelTaskWatchdog()
   });
-
-  // RESET Button - Clear all state
-  resetBtn.addEventListener("click", async () => {
-    // Stop any running tasks
-    isRunning = false;
-    stopTimer();
-
-    // Clear local state
-    loadedTasks = [];
-    taskQueue = [];
-    currentIndex = 0;
-    conversationUrl = "";
-    currentTabId = null;
-    retryCounts.clear();
-    skippedCount = 0;
-    lockedConversationUrl = ""; // Clear locked URL from memory
-
-    // Clear storage (includes lockedConversationUrl)
-    await storageClear();
-
-    // Reset background state
-    await runtimeSendMessage<void>({ action: "RESET_STATE" });
-
-    // Reset UI
-    fileInfo.textContent = t("sidepanel.file.noFile");
-    fileInfo.style.color = "var(--muted)";
-    progressBar.style.width = "0%";
-    progressText.textContent = "0/0";
-    elapsedTimeElement.textContent = t("time.short", { minutes: 0, seconds: 0 });
-    remainingTimeElement.textContent = t("time.unknown");
-    statusText.textContent = t("sidepanel.status.resetComplete");
-    statusText.style.color = "var(--success)";
-    currentFileNameEl.textContent = "";
-    jsonFileInput.value = "";
-
-    // Clear locked URL UI
-    conversationUrlInput.value = "";
-    urlStatus.textContent = "";
-
-    updateUI(false);
-    console.log("[Panel] Reset complete (including locked URL)");
+  bindResetControl({
+    resetBtn,
+    runState,
+    t,
+    stopTimer,
+    updateUI,
+    storageClear,
+    runtimeSendMessage,
+    setLoadedTasks: (tasks) => {
+      loadedTasks = tasks;
+    },
+    fileInfo,
+    progressBar,
+    progressText,
+    elapsedTimeElement,
+    remainingTimeElement,
+    statusText,
+    currentFileNameEl,
+    jsonFileInput,
+    conversationUrlInput,
+    urlStatus,
+    onBeforeReset: () => taskLifecycle.cancelTaskWatchdog()
   });
-
-  // Process next task
-  async function processNextTask() {
-    if (!isRunning) return;
-
-    if (currentIndex >= taskQueue.length) {
-      // All done
-      isRunning = false;
-      stopTimer();
-      updateUI(false);
-      statusText.textContent = t("sidepanel.status.allTasksCompleted");
-      statusText.style.color = "var(--success)";
-      progressBar.style.width = "100%";
-      currentFileNameEl.textContent = "";
-      const elapsedMs = Date.now() - startTime;
-      const totalTasks = taskQueue.length;
-      const completedCount = Math.max(totalTasks - skippedCount - failedCount, 0);
-      const averageMs = totalTasks > 0 ? Math.round(elapsedMs / totalTasks) : 0;
-      appendLogLine(t("sidepanel.log.summaryTitle"));
-      appendLogLine(
-        t("sidepanel.log.summary.total", {
-          count: totalTasks
-        })
-      );
-      appendLogLine(
-        t("sidepanel.log.summary.completed", {
-          count: completedCount
-        })
-      );
-      appendLogLine(
-        t("sidepanel.log.summary.skipped", {
-          count: skippedCount
-        })
-      );
-      appendLogLine(
-        t("sidepanel.log.summary.failed", {
-          count: failedCount
-        })
-      );
-      appendLogLine(
-        t("sidepanel.log.summary.totalTime", {
-          time: formatDuration(elapsedMs)
-        })
-      );
-      appendLogLine(
-        t("sidepanel.log.summary.avgPerTask", {
-          time: formatDuration(averageMs)
-        })
-      );
-      return;
-    }
-
-    const task = taskQueue[currentIndex];
-    const taskMode = nextTaskMode;
-    nextTaskMode = "full";
-    if (lastLogTaskIndex !== currentIndex) {
-      clearLogOutput();
-      lastLogTaskIndex = currentIndex;
-    }
-    const total = taskQueue.length;
-
-    // Get safe filename for display
-    let displayName = task.name.replace(/[^a-z0-9_\-.]/gi, "_");
-    if (
-      !displayName.toLowerCase().endsWith(".png") &&
-      !displayName.toLowerCase().endsWith(".jpg")
-    ) {
-      displayName += ".png";
-    }
-
-    // Update progress
-    progressText.textContent = t("sidepanel.status.taskProgress", {
-      current: currentIndex + 1,
-      total
-    });
-    progressBar.style.width = `${((currentIndex + 1) / total) * 100}%`;
-    statusText.textContent =
-      taskMode === "download-only"
-        ? t("sidepanel.status.retryingDownload")
-        : t("sidepanel.status.generating");
-    statusText.style.color = "var(--text)";
-    currentFileNameEl.textContent = t("sidepanel.currentFile", {
-      name: displayName
-    });
-
-    // Save current task to storage
-    await storageSet({ currentTask: task, currentTaskMode: taskMode });
-
-    if (!currentTabId) {
-      statusText.textContent = t("sidepanel.status.noActiveTab");
-      statusText.style.color = "var(--danger)";
-      isRunning = false;
-      updateUI(false);
-      return;
-    }
-
-    // Inject content script
-    console.log(`[Panel] Injecting script for task ${currentIndex + 1}`);
-    try {
-      await executeScript({
-        target: { tabId: currentTabId },
-        files: ["content.js"]
-      });
-    } catch (err) {
-      console.error("[Panel] Injection failed:", err);
-      statusText.textContent = t("sidepanel.status.refreshGemini");
-      statusText.style.color = "var(--danger)";
-      isRunning = false;
-      updateUI(false);
-    }
-  }
-
-  async function handleTaskError(error: string, errorType?: TaskErrorType) {
-    console.error(`[Panel] Task error: ${error}`);
-    if (!isRunning) return;
-
-    const settings = await storageGet<{
-      settings_maxRetries?: number;
-      settings_maxConsecutiveFailures?: number;
-    }>(["settings_maxRetries", "settings_maxConsecutiveFailures"]);
-    const maxRetries = Math.max(0, settings.settings_maxRetries ?? 3);
-    const maxConsecutiveFailures = Math.max(
-      0,
-      settings.settings_maxConsecutiveFailures ?? 5
-    );
-    const resolvedErrorType: TaskErrorType =
-      errorType ??
-      (isFolderAuthErrorMessage(error)
-        ? "folder"
-        : isDownloadErrorMessage(error)
-          ? "download"
-          : "generation");
-
-    if (resolvedErrorType === "locked-url") {
-      statusText.textContent = error || t("sidepanel.status.lockedUrlError");
-      statusText.style.color = "var(--danger)";
-      appendLogLine(`Locked URL error - stopped: ${error}`);
-      isRunning = false;
-      stopTimer();
-      updateUI(false);
-      const storedUrl = await storageGet<{ lockedConversationUrl?: string }>([
-        "lockedConversationUrl"
-      ]);
-      const targetUrl = storedUrl.lockedConversationUrl || lockedConversationUrl;
-      if (targetUrl) {
-        conversationUrl = targetUrl;
-        try {
-          const newTab = await tabsCreate({ url: targetUrl, active: true });
-          currentTabId = newTab.id ?? null;
-        } catch (err) {
-          console.warn("[Panel] Failed to open locked URL tab:", err);
-        }
-      }
-      return;
-    }
-
-    if (resolvedErrorType === "folder") {
-      statusText.textContent = t("sidepanel.status.folderAccessError", {
-        error
-      });
-      statusText.style.color = "var(--danger)";
-      appendLogLine(`Folder access error - stopped: ${error}`);
-      isRunning = false;
-      stopTimer();
-      updateUI(false);
-      return;
-    }
-
-    const currentRetries = retryCounts.get(currentIndex) ?? 0;
-
-    if (currentRetries < maxRetries) {
-      const nextRetry = currentRetries + 1;
-      retryCounts.set(currentIndex, nextRetry);
-      const retryLabel =
-        resolvedErrorType === "download"
-          ? t("sidepanel.status.retryingDownloadShort")
-          : t("sidepanel.status.retrying");
-      statusText.textContent = t("sidepanel.status.retryingWithCount", {
-        label: retryLabel,
-        current: nextRetry,
-        max: maxRetries
-      });
-      statusText.style.color = "var(--warning)";
-      if (resolvedErrorType === "download") {
-        nextTaskMode = "download-only";
-        void processNextTask();
-      } else {
-        nextTaskMode = "full";
-        recreateTab();
-      }
-      return;
-    }
-
-    retryCounts.delete(currentIndex);
-    failedCount += 1;
-    consecutiveFailureCount += 1;
-    appendLogLine(`Failed task ${currentIndex + 1} (${resolvedErrorType}): ${error}`);
-    statusText.textContent = t("sidepanel.status.failed", { error });
-    statusText.style.color = "var(--danger)";
-
-    if (maxConsecutiveFailures > 0 && consecutiveFailureCount >= maxConsecutiveFailures) {
-      statusText.textContent = t("sidepanel.status.stoppedAfterFailures", {
-        count: consecutiveFailureCount,
-        error
-      });
-      statusText.style.color = "var(--danger)";
-      isRunning = false;
-      stopTimer();
-      updateUI(false);
-      return;
-    }
-
-    currentIndex += 1;
-    updateRemainingTime();
-
-    if (currentIndex < taskQueue.length && isRunning) {
-      nextTaskMode = "full";
-      recreateTab();
-    } else {
-      void processNextTask();
-    }
-  }
 
   // Listen for messages from content script
   chrome.runtime.onMessage.addListener((request: PanelMessage) => {
-    if (request.action === "TASK_COMPLETE") {
-      console.log(
-        `[Panel] Task ${currentIndex + 1} complete (skipped: ${
-          request.skipped
-        })`
-      );
-      retryCounts.delete(currentIndex);
-      if (request.skipped) {
-        skippedCount += 1;
-      }
-      consecutiveFailureCount = 0;
-      currentIndex++;
-
-      // Update remaining time estimate after each task completes
-      updateRemainingTime();
-
-      if (currentIndex < taskQueue.length && isRunning) {
-        // Recreate tab for next task
-        recreateTab();
-      } else {
-        // All done
-        processNextTask();
-      }
-    }
-
-    if (request.action === "TASK_ERROR") {
-      void handleTaskError(request.error, request.errorType);
-    }
-
-    if (request.action === "UPDATE_STATUS") {
-      statusText.textContent = request.status;
-      statusText.style.color = request.isError
-        ? "var(--danger)"
-        : "var(--text)";
-    }
-
-    if (request.action === "PANEL_LOG") {
-      const sourceTag = request.source ? `[${request.source}] ` : "";
-      const levelTag = request.level ? `[${request.level}] ` : "";
-      const dataText = formatLogData(request.data);
-      appendLogLine(
-        `[${request.timestamp}] ${sourceTag}${levelTag}${request.message}${dataText}`
-      );
-    }
+    taskLifecycle.handlePanelMessage(request);
   });
-
-  // Recreate tab: close old tab, open new one
-  async function recreateTab() {
-    console.log("[Panel] Recreating tab...");
-    statusText.textContent = t("sidepanel.status.resettingBrowserContext");
-
-    // Get Settings
-    const settings = await storageGet<{
-      settings_taskInterval?: number;
-      settings_pageLoadTimeout?: number;
-      settings_stepDelay?: number;
-    }>(["settings_taskInterval", "settings_pageLoadTimeout", "settings_stepDelay"]);
-    const taskInterval = (settings.settings_taskInterval || 5) * 1000;
-    const pageLoadTimeout = (settings.settings_pageLoadTimeout || 30) * 1000;
-
-    // Close current tab
-    if (currentTabId) {
-      try {
-        await tabsRemove(currentTabId);
-      } catch (err) {
-        console.log("[Panel] Tab already closed:", err);
-      }
-    }
-
-    // Wait for Task Interval (User Setting)
-    await new Promise((r) => setTimeout(r, taskInterval));
-
-    if (!isRunning) return;
-
-    // Open new tab
-    console.log(`[Panel] Opening new tab: ${conversationUrl}`);
-    const newTab = await tabsCreate({ url: conversationUrl });
-    currentTabId = newTab.id ?? null;
-
-    if (!currentTabId) {
-      statusText.textContent = t("sidepanel.status.errorCreateTab");
-      statusText.style.color = "var(--danger)";
-      isRunning = false;
-      updateUI(false);
-      return;
-    }
-
-    // Wait for page load
-    await waitForPageLoad(currentTabId, pageLoadTimeout);
-
-    // Extra wait for Gemini to initialize
-    const rawStepDelay = settings.settings_stepDelay;
-    const normalizedStepDelay =
-      rawStepDelay && rawStepDelay > 60 ? rawStepDelay / 1000 : rawStepDelay;
-    const tabReadyDelayMs = (normalizedStepDelay || 1) * 2 * 1000;
-    await new Promise((r) => setTimeout(r, tabReadyDelayMs));
-
-    if (lockedConversationUrl) {
-      const lockOk = await ensureLockedConversationTab(
-        currentTabId,
-        pageLoadTimeout,
-        normalizedStepDelay,
-        "new tab"
-      );
-      if (!lockOk || !isRunning) return;
-    }
-
-    if (!isRunning) return;
-
-    // Process next task
-    processNextTask();
-  }
-
-  // Wait for page to finish loading
-  function waitForPageLoad(tabId: number, timeoutMs: number) {
-    return new Promise<void>((resolve) => {
-      const listener = (
-        updatedTabId: number,
-        changeInfo: chrome.tabs.TabChangeInfo
-      ) => {
-        if (updatedTabId === tabId && changeInfo.status === "complete") {
-          chrome.tabs.onUpdated.removeListener(listener);
-          resolve();
-        }
-      };
-      chrome.tabs.onUpdated.addListener(listener);
-
-      // Timeout fallback
-      setTimeout(() => {
-        chrome.tabs.onUpdated.removeListener(listener);
-        resolve();
-      }, timeoutMs);
-    });
-  }
-
-  async function ensureLockedConversationTab(
-    tabId: number,
-    pageLoadTimeout: number,
-    normalizedStepDelay: number | undefined,
-    reason: string
-  ) {
-    if (!lockedConversationUrl) return true;
-    try {
-      const tab = await tabsGet(tabId);
-      const currentUrl = tab.url || "";
-      if (currentUrl && urlsMatch(lockedConversationUrl, currentUrl)) {
-        return true;
-      }
-      console.warn(
-        `[Panel] Locked URL mismatch (${reason}). Expected ${lockedConversationUrl}, got ${currentUrl}`
-      );
-      statusText.textContent = t("sidepanel.status.lockedUrlMismatch");
-      statusText.style.color = "var(--warning)";
-
-      if (currentTabId) {
-        try {
-          await tabsRemove(currentTabId);
-        } catch (err) {
-          console.log("[Panel] Tab already closed:", err);
-        }
-      }
-
-      const freshTab = await tabsCreate({ url: lockedConversationUrl });
-      currentTabId = freshTab.id ?? null;
-
-      if (!currentTabId) {
-        statusText.textContent = t("sidepanel.status.errorCreateTab");
-        statusText.style.color = "var(--danger)";
-        isRunning = false;
-        updateUI(false);
-        return false;
-      }
-
-      await waitForPageLoad(currentTabId, pageLoadTimeout);
-      const tabReadyDelayMs = (normalizedStepDelay || 1) * 2 * 1000;
-      await new Promise((r) => setTimeout(r, tabReadyDelayMs));
-      return true;
-    } catch (err) {
-      console.warn("[Panel] Failed to validate locked URL:", err);
-      return true;
-    }
-  }
 
   // UI Helpers
   function updateUI(running: boolean) {
@@ -1122,13 +402,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   function startTimer() {
-    startTime = Date.now();
+    runState.startTime = Date.now();
     if (timerInterval) {
       clearInterval(timerInterval);
     }
     // Only update elapsed time every second (remaining time is updated only when tasks complete)
     timerInterval = window.setInterval(() => {
-      const elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
+      const elapsedSeconds = Math.floor((Date.now() - runState.startTime) / 1000);
       elapsedTimeElement.textContent = formatTime(elapsedSeconds);
     }, 1000);
   }
@@ -1142,28 +422,16 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // Update remaining time estimate (called when a task completes)
   function updateRemainingTime() {
-    const elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
-    const completedTasks = currentIndex;
-    const totalTasks = taskQueue.length;
-
-    if (completedTasks > 0 && totalTasks > completedTasks) {
-      const avgSecondsPerTask = elapsedSeconds / completedTasks;
-      const remainingTasks = totalTasks - completedTasks;
-      const remainingSeconds = Math.floor(avgSecondsPerTask * remainingTasks);
-      const avgSeconds = Math.round(avgSecondsPerTask);
-      remainingTimeElement.textContent = t("time.remainingWithAvg", {
-        remaining: formatTime(remainingSeconds),
-        avg: avgSeconds
-      });
-    } else if (totalTasks === completedTasks && totalTasks > 0) {
-      const avgSeconds = Math.round(elapsedSeconds / totalTasks);
-      remainingTimeElement.textContent = t("time.remainingWithAvg", {
-        remaining: formatTime(0),
-        avg: avgSeconds
-      });
-    } else {
-      remainingTimeElement.textContent = t("time.unknown");
-    }
+    updateRemainingTimeLabel({
+      t,
+      startTime: runState.startTime,
+      completedTasks: runState.currentIndex,
+      totalTasks: runState.taskQueue.length,
+      formatTime,
+      setLabel: (label) => {
+        remainingTimeElement.textContent = label;
+      }
+    });
   }
 
   chrome.storage.onChanged.addListener((changes, area) => {

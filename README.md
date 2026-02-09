@@ -1,4 +1,4 @@
-# Gemini Auto Image Generator
+# Nano Banana Image Generator
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -105,55 +105,17 @@ This ensures all images are generated in the same context, even if you restart t
 The extension will:
 
 - Send each prompt to Gemini
-- Wait for image generation (up to 5 minutes per image)
+- Wait for image generation (timeout is configurable in Settings; default 120s)
 - Click "Download full size"
 - Rename and move the file to your output folder
 - Recreate the browser tab between tasks for reliability
 
-## 🏗️ Architecture
+## 📚 Technical Docs
 
-```
-├── manifest.json      # Extension config (Manifest V3)
-├── sidepanel.html     # Side panel markup
-├── options.html       # Options page markup
-├── src/sidepanel.ts   # UI and task orchestration
-├── src/content.ts     # Single-task processor (IIFE)
-├── src/background.ts  # File system operations
-├── src/options.ts     # Directory configuration
-├── src/i18n.ts        # UI translations
-└── src/utils/idb.ts   # IndexedDB wrapper for handles
-```
+To keep this README focused on usage, implementation details are documented in `docs/`:
 
-### Key Design Decisions
-
-| Feature         | Approach           | Why                                   |
-| --------------- | ------------------ | ------------------------------------- |
-| Content Script  | Dynamic injection  | Avoids polluting the page permanently |
-| Task Processing | One task per tab   | Prevents Blob URL corruption          |
-| File Detection  | Filesystem polling | More reliable than download listeners |
-| Tab Management  | Destroy & recreate | Ensures clean browser context         |
-
-## ⏱️ Timing Defaults
-
-All timing values are configurable in **Settings** (seconds).
-
-| Setting                 | Default          | Description                                          |
-| ----------------------- | ---------------- | ---------------------------------------------------- |
-| Image Generation Timeout| 120 sec (2 min)  | Max wait for Gemini to generate                      |
-| Download Wait Timeout   | 120 sec (2 min)  | Max wait for file to appear in source folder         |
-| Page Load / Stability   | 30 sec           | Wait for page load and image stability               |
-| Input Field Timeout     | 5 sec            | Wait for prompt input to appear                      |
-| Task Interval           | 5 sec            | Pause between tasks (close old tab, open new tab)    |
-| Action Step Delay       | 1 sec            | Base delay between UI actions                        |
-| Poll Interval           | 1 sec            | Interval for input/send/generation/download checks   |
-
-### Note on slow page loads
-
-If Gemini pages load slowly, increase **Action Step Delay** in Settings. It also scales these derived waits:
-- Tab ready delay after page load: `stepDelay * 2`
-- Send button timeout: `max(input timeout, stepDelay * 5)`
-- Page stability grace window: `min(page load/stability timeout, max(poll interval, stepDelay) * 2)`
-- UI action pauses: `stepDelay`, `stepDelay * 2`, `stepDelay * 3`, `stepDelay / 2`, `max(200ms, stepDelay / 5)`
+- `docs/README.md` - technical docs index (best entry point)
+- `docs/ARCHITECTURE.md` - architecture overview
 
 ## 🐛 Troubleshooting
 

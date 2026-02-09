@@ -289,7 +289,9 @@ saveSettingsBtn.addEventListener("click", async () => {
       "settings_sendPollInterval",
       "settings_generationPollInterval",
       "settings_downloadPollInterval",
-      "settings_downloadStabilityInterval"
+      "settings_downloadStabilityInterval",
+      "settings_downloadDetectTimeout",
+      "settings_downloadStabilityTimeout"
     ]);
 
     saveStatus.textContent = t("options.status.settingsSaved");

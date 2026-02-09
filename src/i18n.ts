@@ -10,7 +10,7 @@ const translations: Record<Language, Record<string, string>> = {
     "time.short": "{{minutes}}m {{seconds}}s",
     "time.unknown": "--m --s",
     "time.remainingWithAvg": "{{remaining}} (avg {{avg}}s)",
-    "options.documentTitle": "Gemini AutoGen Settings",
+    "options.documentTitle": "Nano Banana Image Generator Settings",
     "options.title": "Settings",
     "options.infoBox":
       "<strong>Important:</strong> To enable automatic file checking and renaming, you must authorize access to your <strong>Downloads</strong> folder.",
@@ -25,16 +25,17 @@ const translations: Record<Language, Record<string, string>> = {
     "options.source.button": "Select Source Folder",
     "options.output.label": "Output Folder (Where we move files to)",
     "options.output.help":
-      "Select the folder to save renamed images (e.g., Downloads/GeminiAutoGen).",
+      "Select the folder to save renamed images (e.g., Downloads/NanoBananaImageGenerator).",
     "options.output.button": "Select Output Folder",
     "options.status.notSelected": "Not Selected",
     "options.timing.generationTimeout.label":
       "Image Generation Timeout (seconds)",
     "options.timing.generationTimeout.help":
       "Max wait time for image generation (Default: 120).",
-    "options.timing.downloadTimeout.label": "Download Wait Timeout (seconds)",
+    "options.timing.downloadTimeout.label":
+      "Download Response Timeout (seconds)",
     "options.timing.downloadTimeout.help":
-      "Max wait time for file download detection (Default: 120).",
+      "Max total wait time after clicking download, including detect/stabilize/rename (Default: 120).",
     "options.timing.pageLoadTimeout.label": "Page Load / Stability (seconds)",
     "options.timing.pageLoadTimeout.help":
       "Wait for page load or stability (Default: 30).",
@@ -62,8 +63,8 @@ const translations: Record<Language, Record<string, string>> = {
       "⚠️ Saved: {{name}} (Re-select needed)",
     "options.status.settingsSaved": "✅ Settings Saved!",
     "options.status.errorSaving": "❌ Error Saving",
-    "sidepanel.documentTitle": "Gemini AutoGen",
-    "sidepanel.title": "Gemini AutoGen",
+    "sidepanel.documentTitle": "Nano Banana Image Generator",
+    "sidepanel.title": "Nano Banana Image Generator",
     "sidepanel.settings": "⚙️ Settings",
     "sidepanel.lockedUrl.label": "🔒 Locked Conversation URL",
     "sidepanel.lockedUrl.placeholder": "Paste Gemini chat URL here...",
@@ -174,7 +175,7 @@ const translations: Record<Language, Record<string, string>> = {
     "time.short": "{{minutes}}分{{seconds}}秒",
     "time.unknown": "--分 --秒",
     "time.remainingWithAvg": "{{remaining}} (平均 {{avg}}秒)",
-    "options.documentTitle": "Gemini AutoGen 设置",
+    "options.documentTitle": "Nano Banana Image Generator 设置",
     "options.title": "设置",
     "options.infoBox":
       "<strong>重要提示：</strong>要启用自动检查与重命名，请授权访问你的 <strong>Downloads</strong> 文件夹。",
@@ -187,13 +188,14 @@ const translations: Record<Language, Record<string, string>> = {
     "options.source.help": "选择 Chrome 下载图片的文件夹（例如：Downloads/Chrome）。",
     "options.source.button": "选择源文件夹",
     "options.output.label": "输出文件夹（文件移动到的位置）",
-    "options.output.help": "选择保存重命名图片的文件夹（例如：Downloads/GeminiAutoGen）。",
+    "options.output.help": "选择保存重命名图片的文件夹（例如：Downloads/NanoBananaImageGenerator）。",
     "options.output.button": "选择输出文件夹",
     "options.status.notSelected": "未选择",
     "options.timing.generationTimeout.label": "图片生成超时（秒）",
     "options.timing.generationTimeout.help": "图片生成最大等待时间（默认：120）。",
-    "options.timing.downloadTimeout.label": "下载等待超时（秒）",
-    "options.timing.downloadTimeout.help": "下载检测最大等待时间（默认：120）。",
+    "options.timing.downloadTimeout.label": "下载响应超时（秒）",
+    "options.timing.downloadTimeout.help":
+      "点击下载后的总等待时间，覆盖检测/稳定化/重命名全过程（默认：120）。",
     "options.timing.pageLoadTimeout.label": "页面加载/稳定等待（秒）",
     "options.timing.pageLoadTimeout.help": "等待页面加载或稳定（默认：30）。",
     "options.timing.inputTimeout.label": "输入框超时（秒）",
@@ -213,8 +215,8 @@ const translations: Record<Language, Record<string, string>> = {
     "options.status.savedNeedsReselect": "⚠️ 已保存：{{name}}（需要重新选择）",
     "options.status.settingsSaved": "✅ 设置已保存！",
     "options.status.errorSaving": "❌ 保存出错",
-    "sidepanel.documentTitle": "Gemini AutoGen",
-    "sidepanel.title": "Gemini AutoGen",
+    "sidepanel.documentTitle": "Nano Banana Image Generator",
+    "sidepanel.title": "Nano Banana Image Generator",
     "sidepanel.settings": "⚙️ 设置",
     "sidepanel.lockedUrl.label": "🔒 锁定的对话链接",
     "sidepanel.lockedUrl.placeholder": "在此粘贴 Gemini 对话链接...",

@@ -1,12 +1,14 @@
 {
   "name": "gemini-autogen",
-  "version": "4.10.2",
+  "version": "4.10.7",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "vite build && node scripts/copy-static.mjs",
     "build:watch": "vite build --watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:bdd": "BDD_VERBOSE=1 node --test tests/bdd/**/*.test.mjs",
+    "test:bdd:quiet": "node --test tests/bdd/**/*.test.mjs"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.254",

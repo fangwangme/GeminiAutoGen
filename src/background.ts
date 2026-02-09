@@ -5,8 +5,25 @@ import {
   LANGUAGE_STORAGE_KEY,
   normalizeLanguage
 } from "./i18n.js";
+import { isFolderAuthErrorMessage } from "./utils/errorClassifier.js";
 
-const formatLogTimestamp = () => new Date().toISOString();
+const formatLogTimestamp = () => {
+  const now = new Date();
+  const pad = (value: number, width = 2) => String(value).padStart(width, "0");
+  const year = now.getFullYear();
+  const month = pad(now.getMonth() + 1);
+  const day = pad(now.getDate());
+  const hours = pad(now.getHours());
+  const minutes = pad(now.getMinutes());
+  const seconds = pad(now.getSeconds());
+  const millis = pad(now.getMilliseconds(), 3);
+  const offsetMinutes = -now.getTimezoneOffset();
+  const sign = offsetMinutes >= 0 ? "+" : "-";
+  const offsetAbs = Math.abs(offsetMinutes);
+  const offsetHours = pad(Math.floor(offsetAbs / 60));
+  const offsetMins = pad(offsetAbs % 60);
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}.${millis} GMT${sign}${offsetHours}:${offsetMins}`;
+};
 const attachConsoleTimestamps = () => {
   const levels: Array<"log" | "warn" | "error"> = ["log", "warn", "error"];
   levels.forEach((level) => {
@@ -65,20 +82,6 @@ const normalizePositive = (value: number | undefined, fallback: number) =>
 
 const toErrorMessage = (err: unknown) =>
   err instanceof Error ? err.message : String(err);
-
-const isFolderAuthErrorMessage = (message: string) => {
-  const normalized = message.toLowerCase();
-  return [
-    "missing directory handles",
-    "permission lost",
-    "directory iteration is not supported",
-    "notallowederror",
-    "securityerror",
-    "permission",
-    "not authorized",
-    "denied"
-  ].some((fragment) => normalized.includes(fragment));
-};
 
 const isImageFilename = (filename: string) =>
   /\.(png|jpe?g|webp)$/i.test(filename);
@@ -321,7 +324,7 @@ async function waitForDownloadAndRename(
   }
 
   console.log(
-    `[Background] Waiting for new Gemini image to rename as: ${targetFilename}`
+    `[Background] Waiting for new Gemini image to rename as: ${targetFilename} (Timeout: ${downloadTimeoutSeconds}s, Poll: ${downloadPollIntervalSeconds}s)`
   );
 
   // 1. Get initial file list (before download)
@@ -335,19 +338,22 @@ async function waitForDownloadAndRename(
 
   // 2. Poll for new file
   const startTime = Date.now();
-  const timeout = downloadTimeoutSeconds * 1000; // Convert to ms
+  const timeoutMs = downloadTimeoutSeconds * 1000; // Convert to ms
+  const deadline = startTime + timeoutMs;
   const interval = downloadPollIntervalSeconds * 1000;
   const allowAnyImageAfterMs = Math.min(
-    downloadTimeoutSeconds * 1000,
+    timeoutMs,
     Math.max(
-      Math.round(downloadTimeoutSeconds * 1000 * 0.1),
+      Math.round(timeoutMs * 0.1),
       downloadPollIntervalSeconds * 1000 * 5
     )
   );
   let allowAnyImageLogged = false;
 
-  while (Date.now() - startTime < timeout) {
-    await new Promise((r) => setTimeout(r, interval));
+  while (Date.now() < deadline) {
+    const pollRemainingMs = deadline - Date.now();
+    if (pollRemainingMs <= 0) break;
+    await new Promise((r) => setTimeout(r, Math.min(interval, pollRemainingMs)));
 
     let newFile: string | null = null;
     const elapsedMs = Date.now() - startTime;
@@ -378,8 +384,29 @@ async function waitForDownloadAndRename(
       let stableCount = 0;
 
       while (stableCount < 3) {
+        const stabilizationRemainingMs = deadline - Date.now();
+        if (stabilizationRemainingMs <= 0) {
+          const elapsedSeconds = Math.round((Date.now() - startTime) / 1000);
+          console.error(
+            `[Background] Timeout waiting for file stabilization: ${newFile} (${Math.round(
+              elapsedSeconds
+            )}s)`
+          );
+          return {
+            success: false,
+            error: t("errors.timeoutWaitingDownload"),
+            errorType: "download"
+          };
+        }
+
         await new Promise((r) =>
-          setTimeout(r, downloadStabilityIntervalSeconds * 1000)
+          setTimeout(
+            r,
+            Math.min(
+              downloadStabilityIntervalSeconds * 1000,
+              stabilizationRemainingMs
+            )
+          )
         );
         try {
           const fileHandle = await sourceHandle.getFileHandle(newFile);
@@ -390,6 +417,13 @@ async function waitForDownloadAndRename(
           } else {
             stableCount = 0;
             lastSize = file.size;
+          }
+          if (stableCount === 0) {
+            console.log(
+              `[Background] Waiting file stabilize: ${newFile}, size=${file.size}, elapsed=${Math.round(
+                (Date.now() - startTime) / 1000
+              )}s`
+            );
           }
         } catch {
           console.log("[Background] File not ready yet...");
