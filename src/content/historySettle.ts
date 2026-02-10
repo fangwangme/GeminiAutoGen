@@ -2,6 +2,8 @@ import { evaluateHistoryImageWait } from "./historyWait.js";
 import {
   getLastConversationContainer,
   getLastGeneratedImageInConversation,
+  getResponseReadyState,
+  hasTextOnlyModerationWarning,
   isImageLoaded
 } from "./domHelpers.js";
 
@@ -37,8 +39,20 @@ export async function waitForHistoryImagesToSettle(params: {
       !!lastImage &&
       isImageLoaded(lastImage) &&
       (lastImage.naturalWidth > 100 || lastImage.width > 100);
+    const responseState = lastConversation
+      ? getResponseReadyState(lastConversation)
+      : null;
+    const hasTextOnlyWarning =
+      !!responseState &&
+      responseState.ariaBusy !== "true" &&
+      !responseState.hasVisibleLoader &&
+      hasTextOnlyModerationWarning(lastConversation);
 
-    const waitDecision = evaluateHistoryImageWait({ hasAnyImage, lastImageLoaded });
+    const waitDecision = evaluateHistoryImageWait({
+      hasAnyImage,
+      lastImageLoaded,
+      hasTextOnlyWarning
+    });
     if (!waitDecision.shouldWait) {
       logInfo(`[Content] History ready: ${waitDecision.reason}`);
       return;
@@ -46,7 +60,7 @@ export async function waitForHistoryImagesToSettle(params: {
 
     if (Date.now() - lastReportTime > 2000) {
       logInfo(
-        `[Content] Still waiting: ${waitDecision.reason} (${Math.round(elapsedMs / 1000)}s, hasImage=${hasAnyImage}, loaded=${lastImageLoaded})`
+        `[Content] Still waiting: ${waitDecision.reason} (${Math.round(elapsedMs / 1000)}s, hasImage=${hasAnyImage}, loaded=${lastImageLoaded}, textWarning=${hasTextOnlyWarning})`
       );
       lastReportTime = Date.now();
     }

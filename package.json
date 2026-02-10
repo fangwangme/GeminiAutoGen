@@ -1,6 +1,6 @@
 {
   "name": "gemini-autogen",
-  "version": "4.10.7",
+  "version": "5.0.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,7 +8,8 @@
     "build:watch": "vite build --watch",
     "typecheck": "tsc --noEmit",
     "test:bdd": "BDD_VERBOSE=1 node --test tests/bdd/**/*.test.mjs",
-    "test:bdd:quiet": "node --test tests/bdd/**/*.test.mjs"
+    "test:bdd:quiet": "node --test tests/bdd/**/*.test.mjs",
+    "release:notes": "node scripts/generate-release-notes.mjs"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.254",

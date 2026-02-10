@@ -37,6 +37,7 @@ Why this requirement improves stability:
 - run history-image settle gate:
   - no image yet -> wait
   - last image exists but not loaded -> wait
+  - last response is text-only safety/policy warning -> continue
   - last image loaded -> continue
 
 This prevents sending prompt while previous generation is unfinished.

@@ -47,6 +47,65 @@ export function normalizeText(text: string) {
   return (text || "").replace(/\s+/g, " ").trim();
 }
 
+const TEXT_WARNING_PATTERNS: RegExp[] = [
+  /\b(can't|cannot|can not)\s+(help|assist|generate|create)\b/i,
+  /\b(i('| a)?m sorry[, ]+but i can('| no)?t)\b/i,
+  /\b(unable|failed)\s+to\s+(generate|create|help|assist)\b/i,
+  /\b(violates?|violation)\b.*\b(content|safety)\b.*\b(policy|guidelines?)\b/i,
+  /\b(content|safety)\s+(policy|filter|filters)\b/i,
+  /\b(request|response)\s+(was )?(blocked|rejected)\b/i,
+  /无法(?:生成|处理|提供)/,
+  /不能(?:生成|处理|提供)/,
+  /违反(?:了)?(?:我们的)?(?:内容|安全)?政策/,
+  /内容(?:审核|安全)/,
+  /请求(?:被)?(?:拒绝|拦截)/
+];
+
+function extractTextExcludingUserQuery(root: Element) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      if (!(node instanceof Text)) return NodeFilter.FILTER_REJECT;
+      const parent = node.parentElement;
+      if (!parent) return NodeFilter.FILTER_REJECT;
+      if (parent.closest("user-query")) return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    }
+  });
+  const chunks: string[] = [];
+  while (walker.nextNode()) {
+    const value = walker.currentNode.nodeValue || "";
+    if (value) chunks.push(value);
+  }
+  return normalizeText(chunks.join(" "));
+}
+
+function getAssistantResponseText(container: Element) {
+  const responseRoots = Array.from(
+    container.querySelectorAll<HTMLElement>(
+      "model-response, .presented-response-container, .response-container, .response-content"
+    )
+  ).filter((el) => !el.closest("user-query"));
+
+  if (!responseRoots.length) {
+    return extractTextExcludingUserQuery(container).toLowerCase();
+  }
+
+  const text = responseRoots
+    .map((root) => extractTextExcludingUserQuery(root))
+    .filter(Boolean)
+    .join(" ");
+  return normalizeText(text).toLowerCase();
+}
+
+export function hasTextOnlyModerationWarning(container: Element | null) {
+  if (!container) return false;
+  if (getGeneratedImageCandidates(container).length > 0) return false;
+  if (getDownloadButtonsInContainer(container, true, true).length > 0) return false;
+  const responseText = getAssistantResponseText(container);
+  if (!responseText) return false;
+  return TEXT_WARNING_PATTERNS.some((pattern) => pattern.test(responseText));
+}
+
 export function userQueryMatchesPrompt(
   query: Element | null,
   promptText: string,
