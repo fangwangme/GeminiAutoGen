@@ -2,7 +2,6 @@
 
 import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
-import path from "node:path";
 import process from "node:process";
 
 const HELP_TEXT = `Generate release notes from git history.
@@ -13,10 +12,10 @@ Usage:
 Options:
   --from <ref>      Start ref/tag (default: auto-detect previous tag)
   --to <ref>        End ref/tag (default: HEAD)
-  --version <x.y.z> Version label used in title/output filename
+  --version <x.y.z> Version label used in title
   --title <text>    Explicit title (default: v<version> or <to>)
-  --output <path>   Output markdown path
-  --dry-run         Print notes to stdout without writing file
+  --output <path>   Write markdown to file (default: stdout)
+  --dry-run         Print notes to stdout (same as default behavior)
   --help            Show this help
 `;
 
@@ -319,11 +318,6 @@ function renderNotes(params) {
   return lines.join("\n");
 }
 
-function defaultOutputPath(version, toRef) {
-  const safeTag = version ? `v${version}` : toRef.replace(/[^\w.-]+/g, "_");
-  return path.join(process.cwd(), `release-notes-${safeTag}.md`);
-}
-
 function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
@@ -335,7 +329,7 @@ function main() {
   const fromRef = args.from || inferPreviousTag(toRef);
   const versionLabel = args.version ? `v${args.version}` : toRef;
   const title = args.title || `${versionLabel} Release Notes`;
-  const outputPath = args.output || defaultOutputPath(args.version, toRef);
+  const outputPath = args.output;
   const range = getCompareRange(fromRef, toRef);
 
   const commits = getCommits(range);
@@ -356,8 +350,8 @@ function main() {
     areaSummary
   });
 
-  if (args.dryRun) {
-    console.log(markdown);
+  if (args.dryRun || !outputPath) {
+    process.stdout.write(`${markdown}\n`);
     return;
   }
 

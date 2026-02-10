@@ -39,5 +39,5 @@ Before release:
    - timing config
    - successful generation detection
    - successful download rename/move
-4. Generate release notes draft from commit range:
-   - `npm run release:notes -- --version X.Y.Z --from vPREV --to main --output release-notes-vX.Y.Z.md`
+4. Print and verify release title in terminal:
+   - `echo "Release title: vX.Y.Z"`
