@@ -51,5 +51,6 @@ Special case:
 ## Practical Effect
 
 - generation issues: usually retry full
-- download issues: usually retry download-only first
+- download issues: retry download-only (with tab recreation) until retry budget is exhausted
+- every retry path recreates the tab first to avoid cross-task context contamination
 - hard infrastructure issues (folder/URL mismatch): stop run immediately

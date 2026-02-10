@@ -82,8 +82,8 @@ Content script then returns completion/error via runtime messages that carry `ta
 - policy actions:
   - stop locked-url errors immediately
   - stop folder permission errors immediately
-  - retry download-only for download errors
-  - retry full for generation errors
+  - retry download-only for download errors (always with tab recreation)
+  - retry full for generation errors (with tab recreation)
   - fail-next/fail-stop when retry budget exhausted
 
 Watchdog timeout is treated as a dedicated fail-fast path and moves to next task.

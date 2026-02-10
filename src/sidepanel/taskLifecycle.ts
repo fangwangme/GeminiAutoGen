@@ -459,11 +459,12 @@ export function createTaskLifecycle(deps: TaskLifecycleDeps) {
       statusText.style.color = "var(--warning)";
       if (decision.action === "retry-download") {
         state.nextTaskMode = "download-only";
-        void processNextTask();
+        appendLogLine("[Retry] Recreating tab before download-only retry");
       } else {
         state.nextTaskMode = "full";
-        void recreateTab();
+        appendLogLine("[Retry] Recreating tab before full retry");
       }
+      void recreateTab();
       return;
     }
 
