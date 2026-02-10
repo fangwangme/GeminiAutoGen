@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Nano Banana Image Generator",
-  "version": "5.0.0",
+  "version": "5.0.1",
   "description": "Auto generate & download high-res images from Gemini with precise control",
   "permissions": [
     "activeTab",
