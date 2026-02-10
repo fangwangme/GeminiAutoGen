@@ -38,6 +38,9 @@ const translations: Record<Language, Record<string, string>> = {
     "content.error.promptAnchorNotFound":
       "Prompt anchor not found; aborting to avoid downloading the wrong image",
     "content.error.timeoutDownloadButton": "Timeout waiting for Download Button",
+    "content.error.downloadTriggerNotDetected":
+      "Download was not triggered after clicking the button",
+    "errors.timeoutWaitingDownload": "Timeout waiting for download",
     "validation.lockedUrl.mustGemini": "Locked URL must be a Gemini URL",
     "validation.lockedUrl.mustSpecificConversation":
       "Locked URL is a new conversation URL (use a specific chat URL)",
@@ -75,6 +78,8 @@ const translations: Record<Language, Record<string, string>> = {
     "content.error.promptAnchorNotFound":
       "未找到提示锚点；为避免下载错误图片已中止",
     "content.error.timeoutDownloadButton": "等待下载按钮超时",
+    "content.error.downloadTriggerNotDetected": "点击按钮后未检测到下载触发",
+    "errors.timeoutWaitingDownload": "等待下载超时",
     "validation.lockedUrl.mustGemini": "锁定链接必须是 Gemini 链接",
     "validation.lockedUrl.mustSpecificConversation":
       "锁定链接是新对话链接（请使用具体对话链接）",

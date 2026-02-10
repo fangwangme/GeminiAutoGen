@@ -108,6 +108,10 @@ const { logInfo, logWarn, logError } = createContentLogger(runtimeSendMessage);
     pollIntervalSeconds > 0 ? pollIntervalSeconds : 1;
   const CONFIG_POLL = normalizedPollIntervalSeconds * 1000;
   const CONFIG_SEND_TIMEOUT = Math.max(CONFIG_INPUT_TIMEOUT, CONFIG_STEP_DELAY * 5);
+  const CONFIG_DOWNLOAD_TRIGGER_TIMEOUT = Math.min(
+    CONFIG_DOWNLOAD_TIMEOUT,
+    Math.max(CONFIG_STEP_DELAY * 8, 15000)
+  );
 
   logInfo("[Content] Timing config", {
     generationTimeoutMs: CONFIG_GEN_TIMEOUT,
@@ -298,7 +302,15 @@ const { logInfo, logWarn, logError } = createContentLogger(runtimeSendMessage);
     }
 
     clickDownloadButton(targetBtn);
-    await clickDownloadMenuItem(wait);
+    const menuClicked = await clickDownloadMenuItem(wait);
+    const downloadResponseTimeoutMs = menuClicked
+      ? CONFIG_DOWNLOAD_TIMEOUT
+      : CONFIG_DOWNLOAD_TRIGGER_TIMEOUT;
+    if (!menuClicked) {
+      logWarn("[Content] Download menu item not detected after click", {
+        timeoutMs: downloadResponseTimeoutMs
+      });
+    }
 
     updateStatus(t("content.status.waitingForFile"));
     const renameResult = await Promise.race([
@@ -310,10 +322,12 @@ const { logInfo, logWarn, logError } = createContentLogger(runtimeSendMessage);
         setTimeout(() => {
           resolve({
             success: false,
-            error: t("errors.timeoutWaitingDownload"),
+            error: menuClicked
+              ? t("errors.timeoutWaitingDownload")
+              : t("content.error.downloadTriggerNotDetected"),
             errorType: "download"
           });
-        }, CONFIG_DOWNLOAD_TIMEOUT);
+        }, downloadResponseTimeoutMs);
       })
     ]);
 
