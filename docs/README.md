@@ -22,3 +22,4 @@ This folder contains implementation-focused documentation.
 
 - `testing-and-quality.md`: current automated coverage and validation commands.
 - `troubleshooting-playbook.md`: practical diagnosis checklist for common stuck/failure scenarios.
+- release notes generator: `npm run release:notes -- --help`

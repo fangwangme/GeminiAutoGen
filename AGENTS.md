@@ -68,6 +68,7 @@ When releasing a new version:
    - `npm run build`
    - Zip the dist folder to `.shared/releases/` (use the build output in `.shared/extension-dist`)
 6. Create GitHub release from `main`:
-   - Release notes MUST be auto-generated
-   - Use `gh release create vX.Y.Z ".shared/releases/GeminiAutoGen-vX.Y.Z.zip" --generate-notes`
+   - Generate human-readable notes from git range:
+     - `npm run release:notes -- --version X.Y.Z --from vPREV --to main --output release-notes-vX.Y.Z.md`
+   - Use `gh release create vX.Y.Z ".shared/releases/GeminiAutoGen-vX.Y.Z.zip" --target main -F release-notes-vX.Y.Z.md --fail-on-no-commits`
    - This command creates the tag automatically and uploads the zip asset
