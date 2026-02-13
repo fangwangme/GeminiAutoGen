@@ -6,6 +6,7 @@ import {
   getImageSrc,
   getLoadedImagesInContainer,
   getResponseReadyState,
+  hasTextOnlyModerationWarning,
   isImageLoaded,
   isVisible
 } from "./domHelpers.js";
@@ -62,6 +63,7 @@ export async function waitForGenerationReady(params: {
     null;
   let confirmedNewContainerId: string | null = null;
   let lastPollLogTime = Date.now();
+  let warningDetected = false;
 
   await waitFor(
     () => {
@@ -111,6 +113,10 @@ export async function waitForGenerationReady(params: {
       }
 
       const responseState = getResponseReadyState(targetContainer);
+      const hasTextOnlyWarning =
+        responseState.ariaBusy !== "true" &&
+        !responseState.hasVisibleLoader &&
+        hasTextOnlyModerationWarning(targetContainer);
       if (shouldLog) {
         logInfo("[Content] Generation poll status", {
           tick: pollTick,
@@ -119,8 +125,14 @@ export async function waitForGenerationReady(params: {
           footerComplete: responseState.footerComplete,
           hasVisibleLoader: responseState.hasVisibleLoader,
           hasLoadedImage: responseState.hasLoadedImage,
+          hasTextOnlyWarning,
           baselineReady
         });
+      }
+
+      if (hasTextOnlyWarning) {
+        warningDetected = true;
+        return true;
       }
 
       const hasProgressSignal =
@@ -196,5 +208,10 @@ export async function waitForGenerationReady(params: {
     t("content.error.timeoutDownloadButton")
   );
 
-  return { latestDownloadButtons, latestNewImages, responseContainer };
+  return {
+    latestDownloadButtons,
+    latestNewImages,
+    responseContainer,
+    warningDetected
+  };
 }

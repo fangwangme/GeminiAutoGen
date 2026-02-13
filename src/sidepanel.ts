@@ -49,6 +49,7 @@ import {
   bindLogControls,
   bindSettingsButton
 } from "./sidepanel/uiBindings.js";
+import { CUSTOM_WARNING_PATTERNS_STORAGE_KEY } from "./utils/warningPatterns.js";
 attachConsoleTimestamps();
 
 const LOG_COLLAPSED_STORAGE_KEY = "logCollapsed";
@@ -434,6 +435,34 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
+  const notifyWarningPatternReload = async () => {
+    const tabIds = new Set<number>();
+    if (runState.currentTabId) {
+      tabIds.add(runState.currentTabId);
+    }
+
+    try {
+      const geminiTabs = await tabsQuery({ url: ["https://gemini.google.com/*"] });
+      geminiTabs.forEach((tab) => {
+        if (typeof tab.id === "number") {
+          tabIds.add(tab.id);
+        }
+      });
+    } catch (err) {
+      console.warn("[Panel] Failed to query Gemini tabs for warning pattern sync", err);
+    }
+
+    if (!tabIds.size) return;
+
+    await Promise.all(
+      Array.from(tabIds).map((tabId) =>
+        chrome.tabs
+          .sendMessage(tabId, { action: "RELOAD_WARNING_PATTERNS" })
+          .catch(() => undefined)
+      )
+    );
+  };
+
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
     if (changes[LANGUAGE_STORAGE_KEY]) {
@@ -447,6 +476,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
     if (changes[LOG_COLLAPSED_STORAGE_KEY]) {
       applyLogCollapsed(Boolean(changes[LOG_COLLAPSED_STORAGE_KEY].newValue));
+    }
+    if (changes[CUSTOM_WARNING_PATTERNS_STORAGE_KEY]) {
+      void notifyWarningPatternReload();
     }
   });
 });

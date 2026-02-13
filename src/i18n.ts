@@ -19,6 +19,7 @@ const translations: Record<Language, Record<string, string>> = {
     "options.language.help": "Choose the display language for this extension.",
     "options.section.folders": "1. Folder Configuration",
     "options.section.timing": "2. Timing Settings",
+    "options.section.warningPatterns": "3. Warning Patterns",
     "options.source.label": "Source Folder (Where Chrome saves files)",
     "options.source.help":
       "Select the folder where Chrome downloads images (e.g., Downloads/Chrome).",
@@ -58,6 +59,18 @@ const translations: Record<Language, Record<string, string>> = {
     "options.timing.pollInterval.help":
       "Used for input/send/generation/download checks (Default: 1).",
     "options.timing.save": "Save Timing Settings",
+    "options.warningPatterns.help":
+      "Add custom moderation warning patterns. Supports plain text, wildcard * and /regex/flags.",
+    "options.warningPatterns.add": "+ Add Pattern",
+    "options.warningPatterns.removeAria": "Remove pattern",
+    "options.warningPatterns.inputPlaceholder":
+      "Example: /not\\s+one\\s+like\\s+that/i or *blocked*",
+    "options.warningPatterns.empty": "No custom patterns yet.",
+    "options.warningPatterns.saved": "✅ Warning patterns saved ({{count}})",
+    "options.warningPatterns.invalid":
+      "❌ {{count}} invalid pattern(s). Regex must use valid /pattern/flags syntax.",
+    "options.warningPatterns.maxReached":
+      "❌ Reached max patterns limit ({{max}}).",
     "options.status.selected": "✅ Selected: {{name}}",
     "options.status.savedNeedsReselect":
       "⚠️ Saved: {{name}} (Re-select needed)",
@@ -127,6 +140,8 @@ const translations: Record<Language, Record<string, string>> = {
     "content.status.waitingForFile": "Waiting for file...",
     "content.status.processing": "Processing: {{name}}",
     "content.status.skipped": "Skipped: {{name}}",
+    "content.status.warningDetectedSkip":
+      "Warning detected, skipped for prompt update: {{name}}",
     "content.status.complete": "Complete: {{name}}",
     "content.status.generating": "Generating...",
     "content.status.error": "Error: {{message}}",
@@ -184,6 +199,7 @@ const translations: Record<Language, Record<string, string>> = {
     "options.language.help": "选择插件的显示语言。",
     "options.section.folders": "1. 文件夹配置",
     "options.section.timing": "2. 时间设置",
+    "options.section.warningPatterns": "3. 警告匹配规则",
     "options.source.label": "源文件夹（Chrome 保存文件的位置）",
     "options.source.help": "选择 Chrome 下载图片的文件夹（例如：Downloads/Chrome）。",
     "options.source.button": "选择源文件夹",
@@ -211,6 +227,17 @@ const translations: Record<Language, Record<string, string>> = {
     "options.timing.pollInterval.label": "轮询间隔（秒）",
     "options.timing.pollInterval.help": "用于输入/发送/生成/下载检查（默认：1）。",
     "options.timing.save": "保存时间设置",
+    "options.warningPatterns.help":
+      "添加自定义违规警告匹配规则。支持纯文本、通配符 * 和 /正则/flags。",
+    "options.warningPatterns.add": "+ 添加规则",
+    "options.warningPatterns.removeAria": "删除规则",
+    "options.warningPatterns.inputPlaceholder":
+      "示例：/not\\s+one\\s+like\\s+that/i 或 *blocked*",
+    "options.warningPatterns.empty": "暂无自定义规则。",
+    "options.warningPatterns.saved": "✅ 警告规则已保存（{{count}}）",
+    "options.warningPatterns.invalid":
+      "❌ 有 {{count}} 条规则无效。正则请使用合法的 /pattern/flags 语法。",
+    "options.warningPatterns.maxReached": "❌ 已达到最大规则数量（{{max}}）。",
     "options.status.selected": "✅ 已选择：{{name}}",
     "options.status.savedNeedsReselect": "⚠️ 已保存：{{name}}（需要重新选择）",
     "options.status.settingsSaved": "✅ 设置已保存！",
@@ -279,6 +306,7 @@ const translations: Record<Language, Record<string, string>> = {
     "content.status.waitingForFile": "等待文件...",
     "content.status.processing": "处理中：{{name}}",
     "content.status.skipped": "已跳过：{{name}}",
+    "content.status.warningDetectedSkip": "检测到警告，已跳过并请修改提示词：{{name}}",
     "content.status.complete": "完成：{{name}}",
     "content.status.generating": "正在生成...",
     "content.status.error": "错误：{{message}}",

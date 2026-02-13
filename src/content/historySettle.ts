@@ -33,12 +33,6 @@ export async function waitForHistoryImagesToSettle(params: {
     }
 
     const lastConversation = getLastConversationContainer();
-    const lastImage = getLastGeneratedImageInConversation(lastConversation);
-    const hasAnyImage = Boolean(lastImage);
-    const lastImageLoaded =
-      !!lastImage &&
-      isImageLoaded(lastImage) &&
-      (lastImage.naturalWidth > 100 || lastImage.width > 100);
     const responseState = lastConversation
       ? getResponseReadyState(lastConversation)
       : null;
@@ -47,6 +41,14 @@ export async function waitForHistoryImagesToSettle(params: {
       responseState.ariaBusy !== "true" &&
       !responseState.hasVisibleLoader &&
       hasTextOnlyModerationWarning(lastConversation);
+    const lastImage = hasTextOnlyWarning
+      ? null
+      : getLastGeneratedImageInConversation(lastConversation);
+    const hasAnyImage = Boolean(lastImage);
+    const lastImageLoaded =
+      !!lastImage &&
+      isImageLoaded(lastImage) &&
+      (lastImage.naturalWidth > 100 || lastImage.width > 100);
 
     const waitDecision = evaluateHistoryImageWait({
       hasAnyImage,

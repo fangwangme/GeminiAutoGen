@@ -10,6 +10,8 @@ const translations: Record<Language, Record<string, string>> = {
     "content.status.waitingForFile": "Waiting for file...",
     "content.status.processing": "Processing: {{name}}",
     "content.status.skipped": "Skipped: {{name}}",
+    "content.status.warningDetectedSkip":
+      "Warning detected, skipped for prompt update: {{name}}",
     "content.status.complete": "Complete: {{name}}",
     "content.status.generating": "Generating...",
     "content.status.error": "Error: {{message}}",
@@ -54,6 +56,7 @@ const translations: Record<Language, Record<string, string>> = {
     "content.status.waitingForFile": "等待文件...",
     "content.status.processing": "处理中：{{name}}",
     "content.status.skipped": "已跳过：{{name}}",
+    "content.status.warningDetectedSkip": "检测到警告，已跳过并请修改提示词：{{name}}",
     "content.status.complete": "完成：{{name}}",
     "content.status.generating": "正在生成...",
     "content.status.error": "错误：{{message}}",

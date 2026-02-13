@@ -810,6 +810,17 @@ const { logInfo, logWarn, logError } = createContentLogger(runtimeSendMessage);
       latestDownloadButtons = generationResult.latestDownloadButtons;
       latestNewImages = generationResult.latestNewImages;
       responseContainer = generationResult.responseContainer;
+      if (generationResult.warningDetected) {
+        const warningStatus = t("content.status.warningDetectedSkip", {
+          name: task.name
+        });
+        logWarn("[Content] Moderation warning detected. Task skipped for prompt revision.", {
+          taskName: task.name
+        });
+        updateStatus(warningStatus, true);
+        reportTaskComplete(true);
+        return;
+      }
     } catch (err) {
       const stopBtn = getStopButton();
       if (stopBtn && isButtonEnabled(stopBtn)) {

@@ -23,6 +23,7 @@ This document defines extension storage keys, ownership, and defaults.
 
 - `uiLanguage`: `"en" | "zh"`
 - `logCollapsed`: `boolean`
+- `custom_warning_patterns`: `string[]` (default `[]`, max `50`)
 
 ## Folder Handle Keys (IndexedDB via `utils/idb.ts`)
 

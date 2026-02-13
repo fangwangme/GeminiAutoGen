@@ -3,7 +3,7 @@ export const evaluateContentHistoryImageWait = ({
   lastImageLoaded,
   hasTextOnlyWarning = false
 }) => {
-  if (hasTextOnlyWarning && !hasAnyImage) {
+  if (hasTextOnlyWarning) {
     return { shouldWait: false, reason: "last-response-text-warning" };
   }
   if (!hasAnyImage) {

@@ -1,3 +1,9 @@
+import {
+  compileWarningPattern,
+  CUSTOM_WARNING_PATTERNS_STORAGE_KEY,
+  sanitizeCustomWarningPatterns
+} from "../utils/warningPatterns.js";
+
 export function isVisible(element: Element | null): element is HTMLElement {
   if (!element || !(element instanceof HTMLElement)) return false;
   const rect = element.getBoundingClientRect();
@@ -47,7 +53,7 @@ export function normalizeText(text: string) {
   return (text || "").replace(/\s+/g, " ").trim();
 }
 
-const TEXT_WARNING_PATTERNS: RegExp[] = [
+const BUILTIN_TEXT_WARNING_PATTERNS: RegExp[] = [
   /\b(can't|cannot|can not)\s+(help|assist|generate|create)\b/i,
   /\b(i('| a)?m sorry[, ]+but i can('| no)?t)\b/i,
   /\b(unable|failed)\s+to\s+(generate|create|help|assist)\b/i,
@@ -60,6 +66,93 @@ const TEXT_WARNING_PATTERNS: RegExp[] = [
   /内容(?:审核|安全)/,
   /请求(?:被)?(?:拒绝|拦截)/
 ];
+
+let mergedTextWarningPatterns: RegExp[] = [...BUILTIN_TEXT_WARNING_PATTERNS];
+
+const updateCustomWarningPatterns = (value: unknown) => {
+  const customInputs = sanitizeCustomWarningPatterns(value);
+  const customRegexes: RegExp[] = [];
+
+  customInputs.forEach((input) => {
+    try {
+      customRegexes.push(compileWarningPattern(input));
+    } catch (err) {
+      console.warn(`[Content] Invalid warning pattern ignored: ${input}`, err);
+    }
+  });
+
+  mergedTextWarningPatterns = [
+    ...BUILTIN_TEXT_WARNING_PATTERNS,
+    ...customRegexes
+  ];
+};
+
+const loadCustomWarningPatterns = async () => {
+  try {
+    const result = (await chrome.storage.local.get([
+      CUSTOM_WARNING_PATTERNS_STORAGE_KEY
+    ])) as Record<string, unknown>;
+    updateCustomWarningPatterns(result[CUSTOM_WARNING_PATTERNS_STORAGE_KEY]);
+  } catch (err) {
+    console.warn("[Content] Failed to load custom warning patterns", err);
+  }
+};
+
+const isWarningPatternReloadMessage = (
+  value: unknown
+): value is { action: "RELOAD_WARNING_PATTERNS" } =>
+  typeof value === "object" &&
+  value !== null &&
+  (value as { action?: unknown }).action === "RELOAD_WARNING_PATTERNS";
+
+type WarningPatternListenerState = {
+  storageListener: (
+    changes: { [key: string]: chrome.storage.StorageChange },
+    areaName: string
+  ) => void;
+  runtimeListener: (
+    message: unknown,
+    sender: chrome.runtime.MessageSender,
+    sendResponse: (response?: unknown) => void
+  ) => void;
+};
+
+declare global {
+  interface Window {
+    __geminiAutoGenWarningPatternListenerState?: WarningPatternListenerState;
+  }
+}
+
+const existingListenerState = window.__geminiAutoGenWarningPatternListenerState;
+if (existingListenerState) {
+  chrome.storage.onChanged.removeListener(existingListenerState.storageListener);
+  chrome.runtime.onMessage.removeListener(existingListenerState.runtimeListener);
+}
+
+const storageListener: WarningPatternListenerState["storageListener"] = (
+  changes,
+  area
+) => {
+  if (area !== "local") return;
+  if (!changes[CUSTOM_WARNING_PATTERNS_STORAGE_KEY]) return;
+  updateCustomWarningPatterns(changes[CUSTOM_WARNING_PATTERNS_STORAGE_KEY].newValue);
+};
+
+const runtimeListener: WarningPatternListenerState["runtimeListener"] = (
+  request
+) => {
+  if (!isWarningPatternReloadMessage(request)) return;
+  void loadCustomWarningPatterns();
+};
+
+void loadCustomWarningPatterns();
+
+chrome.storage.onChanged.addListener(storageListener);
+chrome.runtime.onMessage.addListener(runtimeListener);
+window.__geminiAutoGenWarningPatternListenerState = {
+  storageListener,
+  runtimeListener
+};
 
 function extractTextExcludingUserQuery(root: Element) {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
@@ -99,11 +192,11 @@ function getAssistantResponseText(container: Element) {
 
 export function hasTextOnlyModerationWarning(container: Element | null) {
   if (!container) return false;
-  if (getGeneratedImageCandidates(container).length > 0) return false;
+  if (getLoadedImagesInContainer(container).length > 0) return false;
   if (getDownloadButtonsInContainer(container, true, true).length > 0) return false;
   const responseText = getAssistantResponseText(container);
   if (!responseText) return false;
-  return TEXT_WARNING_PATTERNS.some((pattern) => pattern.test(responseText));
+  return mergedTextWarningPatterns.some((pattern) => pattern.test(responseText));
 }
 
 export function userQueryMatchesPrompt(
@@ -250,7 +343,9 @@ export function getLastConversationContainer() {
 
 export function getLastGeneratedImageInConversation(container: Element | null) {
   if (!container) return null;
-  const images = getGeneratedImageCandidates(container);
+  const images = getGeneratedImageCandidates(container).filter(
+    (img) => img.naturalWidth > 100 || img.width > 100 || img.clientWidth > 100
+  );
   if (!images.length) return null;
   return images[images.length - 1] as HTMLImageElement;
 }
