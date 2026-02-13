@@ -50,7 +50,8 @@ Download button candidates:
 ## Contract Expectations
 
 - Last history image must be loaded before new prompt send gate passes.
-- If the latest response is a text-only safety/policy warning (no image/download controls), history gate can pass without waiting image load.
+- Last-image detection ignores small/non-generated image noise (`<=100px`) to avoid false waits.
+- If the latest response matches built-in/custom warning patterns, warning gate takes precedence and history wait passes immediately.
 - Target response container should correspond to new prompt anchor when possible.
 - Download button lookup is scoped to target container first; global fallback second.
 

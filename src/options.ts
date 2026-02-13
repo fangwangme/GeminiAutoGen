@@ -9,6 +9,13 @@ import {
   normalizeLanguage,
   setStoredLanguage
 } from "./i18n.js";
+import {
+  compileWarningPattern,
+  CUSTOM_WARNING_PATTERNS_STORAGE_KEY,
+  MAX_CUSTOM_WARNING_PATTERNS,
+  sanitizeCustomWarningPatterns,
+  tryCompileWarningPattern
+} from "./utils/warningPatterns.js";
 
 type TimingSettings = {
   settings_generationTimeout?: number;
@@ -25,6 +32,7 @@ type TimingSettings = {
   settings_downloadStabilityInterval?: number;
   settings_maxRetries?: number;
   settings_maxConsecutiveFailures?: number;
+  custom_warning_patterns?: unknown;
   outputSubfolder?: string;
   sourceSubfolder?: string;
   uiLanguage?: string;
@@ -95,9 +103,20 @@ const saveStatus = document.getElementById("saveStatus") as HTMLDivElement;
 const languageSelect = document.getElementById(
   "languageSelect"
 ) as HTMLSelectElement;
+const warningPatternsList = document.getElementById(
+  "warningPatternsList"
+) as HTMLDivElement;
+const addWarningPatternBtn = document.getElementById(
+  "addWarningPatternBtn"
+) as HTMLButtonElement;
+const warningPatternsStatus = document.getElementById(
+  "warningPatternsStatus"
+) as HTMLDivElement;
 
 let currentLanguage: Language = DEFAULT_LANGUAGE;
 let t = createTranslator(currentLanguage);
+let warningPatternDrafts: string[] = [];
+let warningPatternSaveTimer: number | undefined;
 
 const setDocumentLanguage = (language: Language) => {
   document.documentElement.lang = language === "zh" ? "zh-CN" : "en";
@@ -130,6 +149,135 @@ const applyLanguage = (language: Language) => {
   currentLanguage = language;
   t = createTranslator(currentLanguage);
   applyTranslations();
+  renderWarningPatternRows();
+};
+
+const setWarningPatternStatus = (message: string, type: "" | "success" | "error") => {
+  warningPatternsStatus.textContent = message;
+  warningPatternsStatus.className = type ? `status ${type}` : "status";
+};
+
+const arraysEqual = (left: string[], right: string[]) =>
+  left.length === right.length && left.every((value, index) => value === right[index]);
+
+const validateWarningPatternDrafts = () => {
+  const invalidIndexes = new Set<number>();
+  warningPatternDrafts.forEach((draft, index) => {
+    const trimmed = draft.trim();
+    if (!trimmed) return;
+    const result = tryCompileWarningPattern(trimmed);
+    if (!result.regex) {
+      invalidIndexes.add(index);
+    }
+  });
+  return invalidIndexes;
+};
+
+const applyWarningPatternValidation = (invalidIndexes: Set<number>) => {
+  const inputs = warningPatternsList.querySelectorAll<HTMLInputElement>(
+    ".warning-pattern-input"
+  );
+  inputs.forEach((input, index) => {
+    const invalid = invalidIndexes.has(index);
+    input.classList.toggle("invalid", invalid);
+    input.setAttribute("aria-invalid", invalid ? "true" : "false");
+  });
+};
+
+async function persistWarningPatterns(showSuccess = false) {
+  const invalidIndexes = validateWarningPatternDrafts();
+  applyWarningPatternValidation(invalidIndexes);
+  if (invalidIndexes.size > 0) {
+    setWarningPatternStatus(
+      t("options.warningPatterns.invalid", {
+        count: invalidIndexes.size
+      }),
+      "error"
+    );
+    return;
+  }
+
+  const normalizedDrafts = warningPatternDrafts
+    .map((draft) => draft.trim())
+    .filter(Boolean);
+  normalizedDrafts.forEach((draft) => {
+    compileWarningPattern(draft);
+  });
+  const patterns = sanitizeCustomWarningPatterns(normalizedDrafts);
+  await storageSet({
+    [CUSTOM_WARNING_PATTERNS_STORAGE_KEY]: patterns
+  });
+  if (showSuccess) {
+    setWarningPatternStatus(
+      t("options.warningPatterns.saved", {
+        count: patterns.length
+      }),
+      "success"
+    );
+  } else if (warningPatternsStatus.classList.contains("error")) {
+    setWarningPatternStatus("", "");
+  }
+}
+
+const scheduleWarningPatternSave = () => {
+  if (warningPatternSaveTimer) {
+    clearTimeout(warningPatternSaveTimer);
+  }
+  warningPatternSaveTimer = window.setTimeout(() => {
+    void persistWarningPatterns();
+  }, 250);
+};
+
+function renderWarningPatternRows() {
+  warningPatternsList.textContent = "";
+  if (!warningPatternDrafts.length) {
+    const empty = document.createElement("div");
+    empty.className = "warning-pattern-empty";
+    empty.textContent = t("options.warningPatterns.empty");
+    warningPatternsList.appendChild(empty);
+    setWarningPatternStatus("", "");
+    return;
+  }
+
+  warningPatternDrafts.forEach((draft, index) => {
+    const row = document.createElement("div");
+    row.className = "warning-pattern-row";
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "warning-pattern-input";
+    input.placeholder = t("options.warningPatterns.inputPlaceholder");
+    input.value = draft;
+    input.autocomplete = "off";
+    input.addEventListener("input", () => {
+      warningPatternDrafts[index] = input.value;
+      scheduleWarningPatternSave();
+      applyWarningPatternValidation(validateWarningPatternDrafts());
+    });
+
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "warning-pattern-remove";
+    removeBtn.textContent = "×";
+    removeBtn.title = t("options.warningPatterns.removeAria");
+    removeBtn.setAttribute("aria-label", t("options.warningPatterns.removeAria"));
+    removeBtn.addEventListener("click", () => {
+      warningPatternDrafts.splice(index, 1);
+      renderWarningPatternRows();
+      void persistWarningPatterns(true);
+    });
+
+    row.appendChild(input);
+    row.appendChild(removeBtn);
+    warningPatternsList.appendChild(row);
+  });
+
+  applyWarningPatternValidation(validateWarningPatternDrafts());
+}
+
+const setWarningPatternDraftsFromStorage = (value: unknown) => {
+  warningPatternDrafts = sanitizeCustomWarningPatterns(value);
+  renderWarningPatternRows();
 };
 
 // Default Values (seconds)
@@ -164,7 +312,8 @@ async function loadSettings() {
     "settings_downloadPollInterval",
     "settings_downloadStabilityInterval",
     "settings_maxRetries",
-    "settings_maxConsecutiveFailures"
+    "settings_maxConsecutiveFailures",
+    CUSTOM_WARNING_PATTERNS_STORAGE_KEY
   ]);
 
   // Set Timing Inputs (or defaults)
@@ -227,6 +376,8 @@ async function loadSettings() {
       name: result.outputSubfolder
     });
   }
+
+  setWarningPatternDraftsFromStorage(result.custom_warning_patterns);
 }
 
 function toSecondsNumber(value: string, fallback: number) {
@@ -306,6 +457,27 @@ saveSettingsBtn.addEventListener("click", async () => {
   }
 });
 
+addWarningPatternBtn.addEventListener("click", () => {
+  if (warningPatternDrafts.length >= MAX_CUSTOM_WARNING_PATTERNS) {
+    setWarningPatternStatus(
+      t("options.warningPatterns.maxReached", {
+        max: MAX_CUSTOM_WARNING_PATTERNS
+      }),
+      "error"
+    );
+    return;
+  }
+  warningPatternDrafts.push("");
+  renderWarningPatternRows();
+  const inputs = warningPatternsList.querySelectorAll<HTMLInputElement>(
+    ".warning-pattern-input"
+  );
+  const latestInput = inputs[inputs.length - 1];
+  if (latestInput) {
+    latestInput.focus();
+  }
+});
+
 const initLanguage = async () => {
   const storedLanguage = await getStoredLanguage();
   applyLanguage(storedLanguage);
@@ -363,13 +535,27 @@ if (languageSelect) {
 }
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== "local" || !changes[LANGUAGE_STORAGE_KEY]) return;
-  const nextLanguage = normalizeLanguage(
-    changes[LANGUAGE_STORAGE_KEY].newValue as string | undefined
-  );
-  if (nextLanguage !== currentLanguage) {
-    applyLanguage(nextLanguage);
-    void loadSettings();
+  if (area !== "local") return;
+  if (changes[LANGUAGE_STORAGE_KEY]) {
+    const nextLanguage = normalizeLanguage(
+      changes[LANGUAGE_STORAGE_KEY].newValue as string | undefined
+    );
+    if (nextLanguage !== currentLanguage) {
+      applyLanguage(nextLanguage);
+      void loadSettings();
+    }
+  }
+  if (changes[CUSTOM_WARNING_PATTERNS_STORAGE_KEY]) {
+    const nextPatterns = sanitizeCustomWarningPatterns(
+      changes[CUSTOM_WARNING_PATTERNS_STORAGE_KEY].newValue
+    );
+    const currentPersistedPatterns = sanitizeCustomWarningPatterns(
+      warningPatternDrafts
+    );
+    if (!arraysEqual(nextPatterns, currentPersistedPatterns)) {
+      warningPatternDrafts = nextPatterns;
+      renderWarningPatternRows();
+    }
   }
 });
 

@@ -37,7 +37,7 @@ Why this requirement improves stability:
 - run history-image settle gate:
   - no image yet -> wait
   - last image exists but not loaded -> wait
-  - last response is text-only safety/policy warning -> continue
+  - last response matches built-in/custom warning patterns -> warning takes precedence, bypass last-image wait
   - last image loaded -> continue
 
 This prevents sending prompt while previous generation is unfinished.
@@ -69,8 +69,11 @@ Signals used:
 - response readiness (`aria-busy`, footer complete, loaded image)
 - new image candidates in target container
 - scoped download button availability
+- text-only warning detection using built-in + `custom_warning_patterns`
 
 No-progress timeout triggers `generation` error.
+
+If warning is detected for current response, task is marked `TASK_COMPLETE(skipped=true)` so prompt can be revised.
 
 ## 7) Download Trigger
 
