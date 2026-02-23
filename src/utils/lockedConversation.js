@@ -31,7 +31,8 @@ export const validateLockedConversationUrl = (url, t) => {
         message: t("validation.lockedUrl.mustSpecificConversation")
       };
     }
-    if (!pathWithoutAccount.includes("/app/")) {
+    const isValidConversation = pathWithoutAccount.startsWith("/app/") || pathWithoutAccount.startsWith("/gem/");
+    if (!isValidConversation) {
       return {
         ok: false,
         message: t("validation.lockedUrl.mustConversation")
