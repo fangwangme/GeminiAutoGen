@@ -1,13 +1,27 @@
 import { isButtonEnabled, isVisible } from "./domHelpers.js";
 
 export function findInputField() {
+  // More comprehensive selectors for both regular Gemini and Gems
   const selectors = [
+    // Primary selectors for regular Gemini
     '.ql-editor.textarea[contenteditable="true"]',
     '.ql-editor[contenteditable="true"]',
     'div[role="textbox"][contenteditable="true"]',
     'rich-textarea .ql-editor[contenteditable="true"]',
     '[aria-label="Enter a prompt here"]',
-    '[data-placeholder="Describe your image"]'
+    '[data-placeholder="Describe your image"]',
+    // Additional selectors for Gemini Gems
+    'input[placeholder*="Message"][type="text"]',
+    'textarea[placeholder*="Message"]',
+    'input.gem-input',
+    'textarea.gem-textarea',
+    '[data-testid="gem-input"]',
+    // Fallback - any visible text input in the main area
+    'main input[type="text"]',
+    'main textarea',
+    // Generic fallback
+    'input[aria-label*="prompt"]',
+    'textarea[aria-label*="prompt"]'
   ];
   for (const selector of selectors) {
     const element = document.querySelector<HTMLElement>(selector);
@@ -90,11 +104,27 @@ export function getStopButton() {
 }
 
 export function getSendButton() {
+  // More comprehensive selectors for both regular Gemini and Gems
   const selectors = [
+    // Primary selectors for regular Gemini
     'button[aria-label="Send message"]',
     "button.send-button",
     "button.submit",
-    'button[mattooltip="Send message"]'
+    'button[mattooltip="Send message"]',
+    // Additional selectors for Gemini Gems
+    'button[aria-label*="Send"]',
+    'button[type="submit"]',
+    'button.gem-send-button',
+    '[data-testid="send-button"]',
+    // Generic button in form
+    'form button[type="submit"]',
+    'form button.primary',
+    // SVG-based buttons (common in modern UI)
+    'button:has(svg[width="20"])',
+    'button:has(svg[width="24"])',
+    // Fallback - any visible submit-like button near input
+    'main button',
+    'form button'
   ];
   for (const selector of selectors) {
     const button = document.querySelector<HTMLButtonElement>(selector);

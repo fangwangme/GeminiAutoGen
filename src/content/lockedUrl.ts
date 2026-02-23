@@ -31,10 +31,11 @@ export const validateLockedConversationUrl = (
         message: t("validation.lockedUrl.mustSpecificConversation")
       };
     }
-    if (path.includes("/app/")) {
-      return { ok: true };
+    const isValidConversation = path.startsWith("/app/") || path.startsWith("/gem/");
+    if (!isValidConversation) {
+      return { ok: false, message: t("validation.lockedUrl.mustConversation") };
     }
-    return { ok: false, message: t("validation.lockedUrl.mustConversation") };
+    return { ok: true };
   } catch {
     return { ok: false, message: t("validation.lockedUrl.invalid") };
   }

@@ -101,8 +101,170 @@ const hasReadWritePermission = async (
   if (typeof handle.queryPermission !== "function") {
     return true;
   }
-  return (await handle.queryPermission({ mode: "readwrite" })) === "granted";
+  const result = await handle.queryPermission({ mode: "readwrite" });
+  if (result === "granted") {
+    return true;
+  }
+  // Try to request permission if not granted (handles permission lost after browser restart)
+  if (typeof handle.requestPermission === "function") {
+    try {
+      const requestResult = await handle.requestPermission({ mode: "readwrite" });
+      return requestResult === "granted";
+    } catch {
+      return false;
+    }
+  }
+  return false;
 };
+
+// --- Fallback: Use Chrome Downloads API when FS API fails ---
+// Use chrome.downloads API as fallback when FS API fails
+async function waitForDownloadAndRenameFallback(
+  targetFilename: string,
+  downloadTimeoutSeconds: number,
+  downloadStabilityIntervalSeconds: number,
+  t: Translator
+): Promise<WaitAndRenameResult> {
+  console.log("[Background] Using Chrome Downloads API fallback");
+
+  // Get default download directory - use empty string to let Chrome determine it
+  const timeoutMs = downloadTimeoutSeconds * 1000;
+
+  // Use chrome.downloads API to wait for new downloads
+  let resolveDownload: ((downloadId: number) => void) | null = null;
+  const downloadPromise = new Promise<number>((resolve) => {
+    resolveDownload = resolve;
+  });
+
+  const onCreated = (downloadItem: chrome.downloads.DownloadItem) => {
+    if (isImageFilename(downloadItem.filename) && 
+        (isPreferredGeminiFilename(downloadItem.filename) || 
+         downloadItem.filename.includes('Gemini'))) {
+      console.log(`[Background] Download detected: ${downloadItem.filename}`);
+      chrome.downloads.onCreated.removeListener(onCreated);
+      if (resolveDownload) {
+        resolveDownload(downloadItem.id);
+      }
+    }
+  };
+
+  chrome.downloads.onCreated.addListener(onCreated);
+
+  try {
+    // Wait for download with timeout
+    const downloadId = await Promise.race([
+      downloadPromise,
+      new Promise<never>((_, reject) => 
+        setTimeout(() => reject(new Error(t("errors.timeoutWaitingDownload"))), timeoutMs)
+      )
+    ]);
+
+    // Wait for download to complete
+    await new Promise<void>((resolve, reject) => {
+      const checkComplete = (downloadItem: chrome.downloads.DownloadItem) => {
+        if (downloadItem.id === downloadId) {
+          if (downloadItem.state === 'completed') {
+            chrome.downloads.onChanged.removeListener(onChanged);
+            resolve();
+          } else if (downloadItem.state === 'interrupted') {
+            chrome.downloads.onChanged.removeListener(onChanged);
+            reject(new Error("Download interrupted"));
+          }
+        }
+      };
+      const onChanged = (downloadDelta: chrome.downloads.DownloadDelta) => {
+        if (downloadDelta.item) {
+          checkComplete(downloadDelta.item);
+        }
+      };
+      chrome.downloads.onChanged.addListener(onChanged);
+      // Also set a timeout
+      setTimeout(() => {
+        chrome.downloads.onChanged.removeListener(onChanged);
+        reject(new Error("Download timeout"));
+      }, timeoutMs);
+    });
+
+    // Find the downloaded file
+    const downloads = await new Promise<chrome.downloads.DownloadItem[]>((resolve) => {
+      chrome.downloads.search({ id: downloadId }, resolve);
+    });
+
+    if (!downloads.length) {
+      return { success: false, error: "Download not found", errorType: "download" };
+    }
+
+    const downloadedFile = downloads[0];
+    const sourcePath = downloadedFile.filename;
+
+    // Try to get output handle for writing
+    const outputHandle = await getOutputHandle();
+    if (!outputHandle) {
+      return {
+        success: false,
+        error: t("errors.missingDirectoryHandles"),
+        errorType: "folder"
+      };
+    }
+
+    // Read the downloaded file using fetch (works for file:// URLs in Chrome extensions)
+    let arrayBuffer: ArrayBuffer;
+    try {
+      const response = await fetch('file://' + sourcePath);
+      arrayBuffer = await response.arrayBuffer();
+    } catch {
+      // Fallback: try to get file handle directly
+      try {
+        // @ts-expect-error - getFileHandle is not in standard types
+        const fileHandle = await chrome.downloads.getFileHandle(downloadId);
+        const file = await fileHandle.getFile();
+        arrayBuffer = await file.arrayBuffer();
+      } catch (err) {
+        return {
+          success: false,
+          error: "Could not read downloaded file",
+          errorType: "download"
+        };
+      }
+    }
+
+    const fileHash = await calculateFileHash(arrayBuffer);
+
+    // Check for duplicate
+    if (lastFileHash && fileHash === lastFileHash) {
+      console.error("[Background] DUPLICATE DETECTED in fallback!");
+      return {
+        success: false,
+        error: t("errors.duplicateImage"),
+        errorType: "generation"
+      };
+    }
+
+    // Move to output folder
+    const targetHandle = await outputHandle.getFileHandle(targetFilename, { create: true });
+    const writable = await targetHandle.createWritable();
+    await writable.write(arrayBuffer);
+    await writable.close();
+
+    // Delete source file
+    try {
+      await chrome.downloads.removeFile(downloadId);
+    } catch {
+      // Ignore if can't delete
+    }
+
+    lastFileHash = fileHash;
+    console.log(`[Background] Fallback Success! Moved to: ${targetFilename}`);
+    return { success: true, filename: targetFilename };
+
+  } catch (err) {
+    const message = toErrorMessage(err);
+    console.error("[Background] Fallback error:", err);
+    return { success: false, error: message, errorType: "download" };
+  } finally {
+    chrome.downloads.onCreated.removeListener(onCreated);
+  }
+}
 
 // --- 1. Message Handling ---
 chrome.runtime.onMessage.addListener(
@@ -307,20 +469,24 @@ async function waitForDownloadAndRename(
   void tabInfo;
 
   if (!sourceHandle || !outputHandle) {
-    return {
-      success: false,
-      error: t("errors.missingDirectoryHandles"),
-      errorType: "folder"
-    };
+    console.log("[Background] FS API handles not available, using Chrome Downloads API fallback");
+    return waitForDownloadAndRenameFallback(
+      targetFilename,
+      downloadTimeoutSeconds,
+      downloadStabilityIntervalSeconds,
+      t
+    );
   }
 
   const sourceValues = getDirectoryValues(sourceHandle);
   if (!sourceValues) {
-    return {
-      success: false,
-      error: t("errors.directoryIterationNotSupported"),
-      errorType: "folder"
-    };
+    console.log("[Background] FS API directory iteration not supported, using Chrome Downloads API fallback");
+    return waitForDownloadAndRenameFallback(
+      targetFilename,
+      downloadTimeoutSeconds,
+      downloadStabilityIntervalSeconds,
+      t
+    );
   }
 
   console.log(

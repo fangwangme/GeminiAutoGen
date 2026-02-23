@@ -44,7 +44,8 @@ import {
 import {
   clickDownloadMenuItem,
   scrollToBottom,
-  writePrompt
+  writePrompt,
+  attachImages
 } from "./content/uxActions.js";
 import {
   CheckFileExistsResponse,
@@ -590,7 +591,7 @@ const { logInfo, logWarn, logError } = createContentLogger(runtimeSendMessage);
       await wait(Math.max(200, CONFIG_STEP_DELAY / 5));
     }
 
-    // Type prompt
+    // Type prompt first
     const inputFieldForWrite = findInputField() || initialInputField;
     const promptWritten = await writePrompt({
       inputField: inputFieldForWrite,
@@ -600,6 +601,22 @@ const { logInfo, logWarn, logError } = createContentLogger(runtimeSendMessage);
     });
     if (!promptWritten) {
       throw new Error(t("content.error.failedToWritePrompt"));
+    }
+
+    // Then attach images (they appear as thumbnails alongside the text)
+    const taskImages = task.images;
+    if (taskImages && taskImages.length > 0) {
+      logInfo(`[Content] Attaching ${taskImages.length} image(s) to prompt`);
+      const imagesAttached = await attachImages({
+        imageUrls: taskImages,
+        wait,
+        stepDelayMs: CONFIG_STEP_DELAY
+      });
+      if (!imagesAttached) {
+        logWarn("[Content] Failed to attach images, continuing anyway");
+      }
+      // Wait for images to be fully processed
+      await wait(CONFIG_STEP_DELAY * 2);
     }
 
     // Wait 1 second before clicking send
